@@ -502,7 +502,7 @@
     <div id="gm-row">
       <button class="gm-btn" data-gm="normal">NORMAL</button>
       <button class="gm-btn" data-gm="waves">WAVES</button>
-      <button class="gm-btn" data-gm="freeplay">FREE PLAY</button>
+      <button class="gm-btn" data-gm="1v1">1v1</button>
     </div>
     <div id="mode-row">
       <button class="mode-btn" data-mode="day">DAY</button>
@@ -593,7 +593,7 @@ if (!Array.isArray(ownedModes)) ownedModes = ['day'];
 if (!ownedModes.includes('day')) ownedModes.push('day');
 
 let mode = localStorage.getItem('fpsMode') || 'day';
-const GAME_MODES = ['normal', 'waves', 'freeplay'];
+const GAME_MODES = ['normal', 'waves', '1v1'];
 let gameMode = localStorage.getItem('fpsGameMode') || 'normal';
 if (!GAME_MODES.includes(gameMode)) gameMode = 'normal';
 document.querySelectorAll('.gm-btn').forEach(btn => {
@@ -3622,8 +3622,13 @@ controls.addEventListener('unlock', () => {
   if (gameOver) return;
   const inMultiplayer = mpState.peer !== null;
   if (inMultiplayer) {
-    // MP: game keeps running. Just prompt the player to re-acquire pointer lock.
-    document.getElementById('mp-click-resume').classList.remove('hidden');
+    if (gameMode === '1v1') {
+      // 1v1 MP: allow quit via pause overlay. Game keeps running for the other player.
+      document.getElementById('pause-overlay').classList.remove('hidden');
+    } else {
+      // Co-op MP: game keeps running. Just prompt the player to re-acquire pointer lock.
+      document.getElementById('mp-click-resume').classList.remove('hidden');
+    }
   } else {
     // Solo: true pause. Stop the simulation and show the pause menu.
     playing = false;
@@ -4486,10 +4491,10 @@ const timeEl = document.getElementById('time');
 const coinsHudEl = document.getElementById('coins');
 coinsHudEl.textContent = coins;
 updateAmmoHUD();
-let timeLeft = gameMode === 'freeplay' ? 0 : 120;
+let timeLeft = gameMode === '1v1' ? 0 : 120;
 const timeLabelEl = document.getElementById('time-label');
 if (gameMode === 'waves') { timeLabelEl.textContent = 'Wave 1:'; timeEl.textContent = '30s'; }
-else if (gameMode === 'freeplay') { timeLabelEl.textContent = 'Time:'; timeEl.textContent = '∞ (0s)'; }
+else if (gameMode === '1v1') { timeLabelEl.textContent = 'Time:'; timeEl.textContent = '∞ (0s)'; }
 else { timeLabelEl.textContent = 'Time:'; timeEl.textContent = '120s'; }
 let gameOver = false;
 let recoil = 0;
@@ -4725,16 +4730,23 @@ function getMuzzleWorld() {
 function rayCastFirst(dirWorld) {
   const origin = camera.position.clone();
   raycaster.set(origin, dirWorld);
-  const hits = raycaster.intersectObjects([...targets, ...mysteryBalls, ...walls], true);
+  // In 1v1 MP, remote player avatars become valid raycast targets
+  const pvpGroups = (gameMode === '1v1' && mpState && mpState.peer)
+    ? Array.from(mpState.remotes.values()).map(r => r.group) : [];
+  const hits = raycaster.intersectObjects([...targets, ...mysteryBalls, ...walls, ...pvpGroups], true);
   if (!hits.length) return null;
-  let cur = hits[0].object, rootKind = null, rootObj = null;
+  let cur = hits[0].object, rootKind = null, rootObj = null, rootPeerId = null;
+  // Build a quick lookup of avatar-group → peerId for player-hit detection
+  const avatarMap = pvpGroups.length ? new Map() : null;
+  if (avatarMap) for (const [pid, r] of mpState.remotes) avatarMap.set(r.group, pid);
   while (cur && !rootKind) {
     if (targets.includes(cur)) { rootKind = 'target'; rootObj = cur; }
     else if (mysteryBalls.includes(cur)) { rootKind = 'mystery'; rootObj = cur; }
     else if (walls.includes(cur)) { rootKind = 'wall'; rootObj = cur; }
+    else if (avatarMap && avatarMap.has(cur)) { rootKind = 'player'; rootObj = cur; rootPeerId = avatarMap.get(cur); }
     else cur = cur.parent;
   }
-  return { hit: hits[0], kind: rootKind, obj: rootObj };
+  return { hit: hits[0], kind: rootKind, obj: rootObj, peerId: rootPeerId };
 }
 
 function resolveHit(hitInfo, damage) {
@@ -4748,6 +4760,18 @@ function resolveHit(hitInfo, damage) {
   } else if (hitInfo.kind === 'target') {
     playHit();
     damageTarget(hitInfo.obj, damage);
+  } else if (hitInfo.kind === 'player' && hitInfo.peerId) {
+    // 1v1 PvP hit
+    playHit();
+    mpSendPlayerHit(hitInfo.peerId, damage || 1);
+  }
+}
+
+function mpSendPlayerHit(peerId, damage) {
+  if (!mpState || !mpState.peer) return;
+  const conn = mpState.isHost ? mpState.conns.get(peerId) : mpState.hostConn;
+  if (conn && conn.open) {
+    try { conn.send({ type: 'playerHit', damage: damage || 1, shooterId: mpState.peer.id }); } catch (_) {}
   }
 }
 
@@ -4850,18 +4874,23 @@ function shoot() {
 
 
   raycaster.setFromCamera(new THREE.Vector2(0, 0), camera);
-  const hits = raycaster.intersectObjects([...targets, ...mysteryBalls, ...walls], true);
+  const pvpGroups = (gameMode === '1v1' && mpState && mpState.peer)
+    ? Array.from(mpState.remotes.values()).map(r => r.group) : [];
+  const hits = raycaster.intersectObjects([...targets, ...mysteryBalls, ...walls, ...pvpGroups], true);
   const endWorld = hits.length
     ? hits[0].point.clone()
     : muzzleWorld.clone().add(raycaster.ray.direction.clone().multiplyScalar(200));
 
-  let rootKind = null, rootObj = null;
+  const avatarMap2 = pvpGroups.length ? new Map() : null;
+  if (avatarMap2) for (const [pid, r] of mpState.remotes) avatarMap2.set(r.group, pid);
+  let rootKind = null, rootObj = null, rootPeerId = null;
   if (hits.length) {
     let cur = hits[0].object;
     while (cur && !rootKind) {
       if (targets.includes(cur)) { rootKind = 'target'; rootObj = cur; }
       else if (mysteryBalls.includes(cur)) { rootKind = 'mystery'; rootObj = cur; }
       else if (walls.includes(cur)) { rootKind = 'wall'; rootObj = cur; }
+      else if (avatarMap2 && avatarMap2.has(cur)) { rootKind = 'player'; rootObj = cur; rootPeerId = avatarMap2.get(cur); }
       else cur = cur.parent;
     }
   }
@@ -5629,7 +5658,7 @@ function animate() {
   let clockSec;
   if (!playing || gameOver) clockSec = 0;
   else if (gameMode === 'waves') clockSec = waveTimeLeft;
-  else if (gameMode === 'freeplay') clockSec = timeLeft;
+  else if (gameMode === '1v1') clockSec = timeLeft;
   else clockSec = timeLeft;
   drawClock(clockSec);
 
@@ -5775,6 +5804,9 @@ function mpHandleDataFromGuest(conn, msg) {
     if (!mpGameStarted && mpReady) mpUpdateWaitingText();
     // Host-side: when a guest's ready flag arrives, the next snapshot cycle will start the game
     mpHostStartCheck();
+  } else if (msg.type === 'playerHit') {
+    // A guest shot the host — apply damage locally
+    damagePlayer(msg.damage || 1);
   } else if (msg.type === 'hit' && typeof damageTarget === 'function') {
     // Host: apply damage to zombie by zid
     const t = targets.find(z => z.userData.zid === msg.zid);
@@ -5782,12 +5814,16 @@ function mpHandleDataFromGuest(conn, msg) {
   }
 }
 function mpHandleDataFromHost(msg) {
+  if (msg.type === 'playerHit') {
+    damagePlayer(msg.damage || 1);
+    return;
+  }
   if (msg.type === 'start') {
     // Host-authoritative game mode — overrides guest's local pick
     if (msg.gameMode && GAME_MODES.includes(msg.gameMode)) {
       gameMode = msg.gameMode;
       // Adjust local timer + HUD label to match host's mode
-      if (gameMode === 'freeplay') { timeLeft = 0; timeEl.textContent = '∞ (0s)'; timeLabelEl.textContent = 'Time:'; }
+      if (gameMode === '1v1') { timeLeft = 0; timeEl.textContent = '∞ (0s)'; timeLabelEl.textContent = 'Time:'; }
       else if (gameMode === 'waves') { timeLabelEl.textContent = 'Wave 1:'; timeEl.textContent = '30s'; }
       else { timeLabelEl.textContent = 'Time:'; timeLeft = 120; timeEl.textContent = '120s'; }
     }
@@ -5807,7 +5843,7 @@ function mpHandleDataFromHost(msg) {
     if (gameMode === 'waves') {
       timeLabelEl.textContent = `Wave ${currentWaveIdx + 1}:`;
       timeEl.textContent = waveTimeLeft + 's';
-    } else if (gameMode === 'freeplay') {
+    } else if (gameMode === '1v1') {
       timeLabelEl.textContent = 'Time:';
       timeEl.textContent = `∞ (${timeLeft}s)`;
     } else {
