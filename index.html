@@ -472,9 +472,16 @@ if (!localStorage.getItem(LIGHTSABER_GRANT)) {
   if (!Array.isArray(_owned)) _owned = ['pistol'];
   if (!_owned.includes('lightsaber')) _owned.push('lightsaber');
   localStorage.setItem('fpsOwned', JSON.stringify(_owned));
-  // Equip it as the melee slot so it's ready to swing
-  localStorage.setItem('fpsLoadoutMelee', 'lightsaber');
   localStorage.setItem(LIGHTSABER_GRANT, '1');
+}
+
+// One-time unequip for players who had the lightsaber auto-equipped in an earlier build
+const LIGHTSABER_UNEQUIP = 'fpsLightsaberUnequipV1';
+if (!localStorage.getItem(LIGHTSABER_UNEQUIP)) {
+  if (localStorage.getItem('fpsLoadoutMelee') === 'lightsaber') {
+    localStorage.setItem('fpsLoadoutMelee', '');
+  }
+  localStorage.setItem(LIGHTSABER_UNEQUIP, '1');
 }
 
 const MODE_COSTS = { day: 0, night: 100, beach: 200, forest: 300, desert: 500, city: 750, snow: 1000 };
