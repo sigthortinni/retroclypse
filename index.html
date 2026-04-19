@@ -3233,7 +3233,7 @@ const grenadeCountEl = document.getElementById('grenade-count');
 const shieldOverlayEl = document.getElementById('shield-overlay');
 function updateGrenadeHUD() {
   if (grenadeState.count > 0) {
-    grenadeCountEl.textContent = `GRENADES: ${grenadeState.count}  (F to throw)`;
+    grenadeCountEl.textContent = `GRENADES: ${grenadeState.count}  (G to throw)`;
     grenadeCountEl.classList.remove('hidden');
   } else {
     grenadeCountEl.classList.add('hidden');
@@ -3269,7 +3269,7 @@ function applyRandomPower() {
   } else if (power === 'grenade') {
     grenadeState.count += 3;
     updateGrenadeHUD();
-    showPowerMsg('GRENADES +3  (press F)', '#9de06c');
+    showPowerMsg('GRENADES +3  (press G)', '#9de06c');
   } else if (power === 'extraLife') {
     playerState.maxLives += 1;
     playerState.lives += 1;
@@ -4107,7 +4107,12 @@ addEventListener('keydown', (e) => {
     musicBus.gain.setTargetAtTime(musicOn ? 0.18 : 0, audioCtx.currentTime, 0.02);
     if (musicOn) startMusic();
   }
-  if (e.code === 'KeyF') throwGrenade();
+  if (e.code === 'KeyF') {
+    // If a melee weapon is equipped, F swings it; otherwise it's ignored
+    const _cfg = GUNS[selectedGun];
+    if (_cfg && _cfg.category === 'melee') shoot();
+  }
+  if (e.code === 'KeyG') throwGrenade();
   if (e.code === 'KeyE') useStim();
   if (e.code === 'Digit1' || e.code === 'Numpad1') equipGun(0);
   if (e.code === 'Digit2' || e.code === 'Numpad2') equipGun(1);
