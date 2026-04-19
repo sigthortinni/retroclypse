@@ -6488,6 +6488,23 @@ function battleHostTryStart() {
   battleStartLocal();
 }
 
+function battlePickRandomSpawn() {
+  // Pick a random point on the map that's outside containers and away from the
+  // default spawn, so every player drops in at a different spot.
+  const pad = 1.5;            // avoid container walls
+  const margin = 4;           // keep away from the map edge
+  for (let tries = 0; tries < 60; tries++) {
+    const rx = (Math.random() - 0.5) * (FLOOR_SIZE - margin * 2);
+    const rz = (Math.random() - 0.5) * (FLOOR_SIZE - margin * 2);
+    if (typeof insideAnyContainerArea === 'function' && insideAnyContainerArea(rx, rz, pad)) continue;
+    return { x: rx, z: rz };
+  }
+  // Fallback: offset from center in a random direction.
+  const ang = Math.random() * Math.PI * 2;
+  const r = 10 + Math.random() * 15;
+  return { x: Math.cos(ang) * r, z: Math.sin(ang) * r };
+}
+
 function battleStartLocal() {
   battleState.started = true;
   battleState.eliminated = false;
@@ -6497,6 +6514,16 @@ function battleStartLocal() {
   // No zombies in battle
   for (const t of targets) scene.remove(t);
   targets.length = 0;
+  // Randomized drop-in: each player teleports to a different random spot.
+  try {
+    const p = battlePickRandomSpawn();
+    camera.position.set(p.x, 1.7, p.z);
+    velocityY = 0;
+    // Face roughly toward map center so early action is visible.
+    const yaw = Math.atan2(-p.x, -p.z);
+    const e = new THREE.Euler(0, yaw, 0, 'YXZ');
+    camera.quaternion.setFromEuler(e);
+  } catch (_) {}
   battleHideWaiting();
   document.getElementById('battle-eliminated').classList.add('hidden');
   playing = true;
