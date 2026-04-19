@@ -275,9 +275,20 @@
     letter-spacing: 2px;
   }
   #shop-items {
-    display: grid; grid-template-columns: 1fr 1fr; gap: 14px;
+    display: block;
     margin-bottom: 22px;
+    max-height: 60vh; overflow-y: auto; padding-right: 6px;
   }
+  .shop-section-header {
+    color: #ffd500; font-family: monospace; letter-spacing: 6px; font-weight: bold;
+    font-size: 15px; margin: 14px 0 10px; padding-bottom: 6px;
+    border-bottom: 2px solid #ffd500;
+  }
+  .shop-grid {
+    display: grid; grid-template-columns: 1fr 1fr; gap: 14px;
+    margin-bottom: 10px;
+  }
+  .real-money { color: #ff88ff; }
   .gun-card {
     background: #080810; border: 2px solid #333;
     padding: 14px; text-align: left; font-family: monospace;
@@ -512,6 +523,11 @@ const GUNS = {
   sniper:    { name: 'SNIPER',       ammo: 5,  cost: 350, body: 0x1f2b1f, accent: 0x2a4028, reloadMs: 1900, desc: 'One-shot kills any zombie.',     ability: 'instakill' },
   rocket:    { name: 'ROCKET',       ammo: 3,  cost: 550, body: 0x3a3a42, accent: 0xff6622, reloadMs: 2100, desc: 'Explosive AoE blast.',           ability: 'explosive', radius: 5.5 },
   laser:     { name: 'LASER CANNON', ammo: 6,  cost: 800, body: 0x242834, accent: 0x00ffff, reloadMs: 3000, desc: 'Hold: 6s beam, 3s cooldown.',    ability: 'beam' },
+  // ---- Melee ----
+  knife:     { name: 'KNIFE',        ammo: 1,  cost: 20,  body: 0x6a6e78, accent: 0x2a2a2a, reloadMs: 0,    desc: 'Silent close-range slash.',       ability: 'melee', category: 'melee', range: 1.8, swingMs: 260 },
+  dagger:    { name: 'DAGGER',       ammo: 1,  cost: 50,  body: 0x7f8590, accent: 0x553311, reloadMs: 0,    desc: 'Longer reach, quick stab.',       ability: 'melee', category: 'melee', range: 2.2, swingMs: 300 },
+  sword:     { name: 'SWORD',        ammo: 1,  cost: 160, body: 0xc0c4cc, accent: 0xa07a2a, reloadMs: 0,    desc: 'Wide arc, big reach.',            ability: 'melee', category: 'melee', range: 2.9, swingMs: 360 },
+  lightsaber:{ name: 'LIGHTSABER',   ammo: 1,  cost: 0,   body: 0x2a2a2e, accent: 0x33ffcc, reloadMs: 0,    desc: 'Hums. Cleaves zombies.',          ability: 'melee', category: 'melee', range: 3.3, swingMs: 280, realMoneyCents: 299 },
 };
 
 let coins = parseInt(localStorage.getItem('fpsCoins') || '0', 10);
@@ -556,38 +572,77 @@ const shopEl = document.getElementById('shop');
 const shopItemsEl = document.getElementById('shop-items');
 const shopCoinsEl = document.getElementById('shop-coins');
 
-function renderShop() {
-  shopCoinsEl.textContent = coins;
-  shopItemsEl.innerHTML = '';
-  for (const [id, g] of Object.entries(GUNS)) {
+// Optional Stripe Payment Link for the lightsaber (real money).
+// To enable: create a $2.99 payment link in Stripe Dashboard and paste URL here.
+// Make the Stripe success URL point back to your game with ?lightsaber=paid.
+const LIGHTSABER_PAYMENT_URL = null;
+
+function renderShopSection(items, header) {
+  if (!items.length) return;
+  const h = document.createElement('div');
+  h.className = 'shop-section-header';
+  h.textContent = header;
+  shopItemsEl.appendChild(h);
+  const grid = document.createElement('div');
+  grid.className = 'shop-grid';
+  shopItemsEl.appendChild(grid);
+  for (const [id, g] of items) {
     const owned = ownedGuns.includes(id);
     const equipped = selectedGun === id;
     const card = document.createElement('div');
     card.className = 'gun-card' + (owned ? ' owned' : '') + (equipped ? ' equipped' : '');
-    const label = equipped ? 'EQUIPPED'
-      : owned ? 'EQUIP'
-      : coins >= g.cost ? `BUY $${g.cost}`
-      : `NEED $${g.cost}`;
-    const costLine = g.cost ? `Cost: $${g.cost}` : 'Default';
+    const isRealMoney = g.realMoneyCents && g.realMoneyCents > 0;
+    let label;
+    if (equipped) label = 'EQUIPPED';
+    else if (owned) label = 'EQUIP';
+    else if (isRealMoney) label = `BUY $${(g.realMoneyCents / 100).toFixed(2)} 💳`;
+    else label = coins >= g.cost ? `BUY $${g.cost}` : `NEED $${g.cost}`;
+    const costLine = isRealMoney
+      ? `<span class="real-money">Cost: $${(g.realMoneyCents / 100).toFixed(2)} (real money)</span>`
+      : (g.cost ? `Cost: $${g.cost}` : 'Default');
+    const statLine = g.category === 'melee'
+      ? `Reach: ${g.range}m · Swing: ${g.swingMs}ms`
+      : `Ammo: ${g.ammo}/${g.ammo}`;
     card.innerHTML = `
       <h3>${g.name}</h3>
-      <div class="stats">${g.desc}<br />Ammo: ${g.ammo}/${g.ammo}<br />${costLine}</div>
-      <button data-gun="${id}" ${(!owned && coins < g.cost) ? 'disabled' : ''}>${label}</button>
+      <div class="stats">${g.desc}<br />${statLine}<br />${costLine}</div>
+      <button data-gun="${id}" ${(!owned && !isRealMoney && coins < g.cost) ? 'disabled' : ''}>${label}</button>
     `;
-    shopItemsEl.appendChild(card);
+    grid.appendChild(card);
   }
+}
+
+function renderShop() {
+  shopCoinsEl.textContent = coins;
+  shopItemsEl.innerHTML = '';
+  const gunItems = [], meleeItems = [];
+  for (const [id, g] of Object.entries(GUNS)) {
+    if (g.category === 'melee') meleeItems.push([id, g]);
+    else gunItems.push([id, g]);
+  }
+  renderShopSection(gunItems, 'GUNS');
+  renderShopSection(meleeItems, 'MELEE');
   shopItemsEl.querySelectorAll('button').forEach(btn => {
     btn.addEventListener('click', (e) => {
       e.stopPropagation();
       const id = btn.dataset.gun;
       const g = GUNS[id];
       if (!ownedGuns.includes(id)) {
+        if (g.realMoneyCents) {
+          if (LIGHTSABER_PAYMENT_URL) {
+            window.open(LIGHTSABER_PAYMENT_URL, '_blank');
+          } else {
+            alert(`Real-money purchase for the ${g.name} is not yet configured.\n\nTo enable it, create a $${(g.realMoneyCents/100).toFixed(2)} Stripe Payment Link, paste the URL into LIGHTSABER_PAYMENT_URL in index.html, and set its success URL to this site with ?lightsaber=paid.`);
+          }
+          return;
+        }
         if (coins >= g.cost) {
           coins -= g.cost;
           ownedGuns.push(id);
           selectedGun = id;
           saveShop();
           coinsDisplay.textContent = '$' + coins;
+          coinsHudEl.textContent = coins;
           renderShop();
         }
       } else if (selectedGun !== id) {
@@ -598,6 +653,19 @@ function renderShop() {
     });
   });
 }
+
+// Grant lightsaber if returning from a successful real-money purchase
+(function checkLightsaberUnlock() {
+  const url = new URL(window.location.href);
+  if (url.searchParams.get('lightsaber') === 'paid') {
+    if (!ownedGuns.includes('lightsaber')) {
+      ownedGuns.push('lightsaber');
+      saveShop();
+    }
+    url.searchParams.delete('lightsaber');
+    history.replaceState({}, '', url.toString());
+  }
+})();
 document.getElementById('shop-btn').addEventListener('click', (e) => {
   e.stopPropagation();
   renderShop();
@@ -2553,6 +2621,60 @@ const muzzleFlash = new THREE.PointLight(0xffaa44, 0, 4);
 muzzleFlash.position.set(0, -0.02, -0.62);
 gun.add(muzzleFlash);
 
+// Melee weapon — one group with swappable blade, follows the camera
+const meleeGroup = new THREE.Group();
+meleeGroup.position.set(0.28, -0.2, -0.45);
+meleeGroup.rotation.set(0, 0, 0);
+meleeGroup.visible = false;
+camera.add(meleeGroup);
+const meleeHandleMat = new THREE.MeshStandardMaterial({ color: 0x2a2a2e, metalness: 0.6, roughness: 0.5 });
+const meleeBladeMat = new THREE.MeshStandardMaterial({ color: 0xc0c4cc, metalness: 0.85, roughness: 0.25 });
+const meleeLightsaberMat = new THREE.MeshStandardMaterial({ color: 0x33ffcc, emissive: 0x33ffcc, emissiveIntensity: 2.2, metalness: 0.1, roughness: 0.1 });
+const meleeHandle = new THREE.Mesh(new THREE.CylinderGeometry(0.028, 0.028, 0.15, 10), meleeHandleMat);
+meleeHandle.rotation.x = Math.PI / 2;
+meleeHandle.position.z = 0.08;
+meleeGroup.add(meleeHandle);
+// Blade geometry gets re-shaped per gun type
+let meleeBlade = new THREE.Mesh(new THREE.BoxGeometry(0.04, 0.04, 0.3), meleeBladeMat);
+meleeBlade.position.z = -0.15;
+meleeGroup.add(meleeBlade);
+let meleeGlow = null;
+const melee = { swinging: false, swingStart: 0 };
+
+function refreshMeleeModel(gunId) {
+  const cfg = GUNS[gunId];
+  if (meleeBlade) { meleeGroup.remove(meleeBlade); meleeBlade.geometry.dispose(); }
+  if (meleeGlow) { meleeGroup.remove(meleeGlow); meleeGlow.geometry.dispose(); meleeGlow.material.dispose(); meleeGlow = null; }
+  if (!cfg || cfg.category !== 'melee') { meleeGroup.visible = false; return; }
+  meleeGroup.visible = true;
+  let bladeLen = 0.3, bladeW = 0.04, bladeMat = meleeBladeMat;
+  if (gunId === 'dagger') { bladeLen = 0.45; bladeW = 0.05; }
+  else if (gunId === 'sword') { bladeLen = 0.85; bladeW = 0.07; }
+  else if (gunId === 'lightsaber') { bladeLen = 1.2; bladeW = 0.09; bladeMat = meleeLightsaberMat; }
+  meleeBlade = new THREE.Mesh(new THREE.BoxGeometry(bladeW, bladeW, bladeLen), bladeMat);
+  meleeBlade.position.z = -(0.15 + bladeLen / 2);
+  meleeGroup.add(meleeBlade);
+  if (gunId === 'lightsaber') {
+    meleeGlow = new THREE.Mesh(new THREE.BoxGeometry(bladeW * 2.2, bladeW * 2.2, bladeLen * 1.02), new THREE.MeshBasicMaterial({
+      color: 0x33ffcc, transparent: true, opacity: 0.35, blending: THREE.AdditiveBlending, depthWrite: false
+    }));
+    meleeGlow.position.z = meleeBlade.position.z;
+    meleeGroup.add(meleeGlow);
+  }
+  // Hide the gun model when a melee is equipped
+  gun.visible = false;
+}
+function refreshGunVisibility() {
+  const cfg = GUNS[selectedGun];
+  if (cfg && cfg.category === 'melee') {
+    gun.visible = false;
+    refreshMeleeModel(selectedGun);
+  } else {
+    gun.visible = true;
+    meleeGroup.visible = false;
+  }
+}
+
 const flashlight = new THREE.Group();
 const flashBodyMat = new THREE.MeshStandardMaterial({ color: 0x1a1a1e, metalness: 0.7, roughness: 0.35 });
 const flashBezelMat = new THREE.MeshStandardMaterial({ color: 0xb0b0b4, metalness: 0.9, roughness: 0.2 });
@@ -3768,6 +3890,52 @@ function resolveHit(hitInfo, damage) {
 function shoot() {
   if (!playing || reloading || gameOver) return;
   if (selectedGun === 'laser') return; // continuous beam, handled in animate loop
+
+  const _gunCfg = GUNS[selectedGun];
+  // Melee weapons: unlimited swings, no ammo, short-range, insta-kill.
+  if (_gunCfg && _gunCfg.category === 'melee') {
+    const now = performance.now();
+    if (now - (window._meleeLastSwing || 0) < _gunCfg.swingMs) return;
+    window._meleeLastSwing = now;
+    melee.swingStart = now;
+    melee.swinging = true;
+    // Swoosh sound (lightsaber gets a higher pitch)
+    const o = audioCtx.createOscillator();
+    const g = audioCtx.createGain();
+    o.type = selectedGun === 'lightsaber' ? 'sine' : 'triangle';
+    const base = selectedGun === 'lightsaber' ? 520 : 300;
+    o.frequency.setValueAtTime(base, audioCtx.currentTime);
+    o.frequency.exponentialRampToValueAtTime(base * 0.5, audioCtx.currentTime + 0.16);
+    g.gain.setValueAtTime(0.14, audioCtx.currentTime);
+    g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.2);
+    o.connect(g); g.connect(audioCtx.destination);
+    o.start(); o.stop(audioCtx.currentTime + 0.22);
+    // Raycast forward short distance and hit first zombie
+    const fwd = new THREE.Vector3();
+    camera.getWorldDirection(fwd);
+    raycaster.set(camera.position.clone(), fwd);
+    raycaster.far = _gunCfg.range;
+    const hits = raycaster.intersectObjects([...targets, ...mysteryBalls], true);
+    raycaster.far = Infinity;
+    if (hits.length) {
+      let cur = hits[0].object, root = null, kind = null;
+      while (cur && !root) {
+        if (targets.includes(cur)) { kind = 'target'; root = cur; break; }
+        if (mysteryBalls.includes(cur)) { kind = 'mystery'; root = cur; break; }
+        cur = cur.parent;
+      }
+      if (kind === 'target') { playHit(); damageTarget(root, 999); }
+      else if (kind === 'mystery') {
+        scene.remove(root);
+        if (root.userData.light) scene.remove(root.userData.light);
+        mysteryBalls.splice(mysteryBalls.indexOf(root), 1);
+        playHit();
+        applyRandomPower();
+      }
+    }
+    return;
+  }
+
   if (ammoState.count <= 0) return;
   ammoState.count--;
   updateAmmoHUD();
@@ -3851,6 +4019,12 @@ function shoot() {
   resolveHit({ hit: hits[0], kind: rootKind, obj: rootObj }, damage);
 }
 function updateAmmoHUD() {
+  const cfg = GUNS[selectedGun];
+  if (cfg && cfg.category === 'melee') {
+    ammoEl.textContent = '∞';
+    maxAmmoEl.textContent = '∞';
+    return;
+  }
   ammoEl.textContent = selectedGun === 'laser' ? Math.ceil(ammoState.count) : ammoState.count;
   maxAmmoEl.textContent = ammoState.max;
 }
@@ -3890,6 +4064,7 @@ function equipGun(idx) {
   ammoState.max = gunStates[idx].max;
   updateAmmoHUD();
   updateHotbar();
+  refreshGunVisibility();
   // Stop any in-progress laser beam state when switching away from laser
   if (laserBeamGroup && laserBeamGroup.visible) {
     laserBeamGroup.visible = false;
@@ -3901,6 +4076,7 @@ function equipGun(idx) {
 }
 function reload() {
   if (selectedGun === 'laser') return;
+  if (GUNS[selectedGun] && GUNS[selectedGun].category === 'melee') return;
   if (ammoState.count >= ammoState.max) return;
   ammoState.count = ammoState.max;
   updateAmmoHUD();
@@ -4112,6 +4288,25 @@ function animate() {
 
   recoil *= 0.85;
   gun.position.z = -0.45 + recoil;
+
+  // Melee swing animation (arc the weapon around briefly)
+  if (melee.swinging) {
+    const cfg = GUNS[selectedGun];
+    const dur = (cfg && cfg.swingMs) || 300;
+    const elapsed = performance.now() - melee.swingStart;
+    const k = Math.min(1, elapsed / dur);
+    // Wind-up at start, follow-through back to rest
+    const phase = Math.sin(k * Math.PI);
+    meleeGroup.rotation.z = -phase * 1.3;
+    meleeGroup.rotation.x = phase * 0.4;
+    meleeGroup.position.z = -0.45 - phase * 0.12;
+    if (k >= 1) {
+      melee.swinging = false;
+      meleeGroup.rotation.z = 0;
+      meleeGroup.rotation.x = 0;
+      meleeGroup.position.z = -0.45;
+    }
+  }
   muzzleFlash.intensity *= 0.5;
 
   for (const c of clouds) {
@@ -5086,6 +5281,9 @@ mpJoinInput.addEventListener('click', (e) => e.stopPropagation());
 mpRoomCodeEl.addEventListener('keydown', (e) => {
   if (e.code === 'Enter') { e.stopPropagation(); mpJoin(mpRoomCodeEl.value); }
 });
+
+// Initial weapon visibility (gun vs melee) based on the equipped slot
+refreshGunVisibility();
 
 // Start the render loop now that all module state (mpState, ammoState, etc.) is initialized.
 animate();
