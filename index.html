@@ -150,6 +150,55 @@
     cursor: pointer; font-weight: bold; letter-spacing: 3px;
   }
   #loot-btn:hover { background: #9fefbb; border-color: #9fefbb; }
+  #skins-btn {
+    background: #b84aff; color: #1a0836; border: 2px solid #b84aff;
+    padding: 8px 24px; font-family: monospace; font-size: 16px;
+    cursor: pointer; font-weight: bold; letter-spacing: 3px;
+  }
+  #skins-btn:hover { background: #d89aff; border-color: #d89aff; }
+  #skin-shop {
+    position: absolute; inset: 0; background: rgba(0,0,0,0.92);
+    display: flex; align-items: center; justify-content: center; z-index: 10;
+  }
+  #skin-shop.hidden { display: none; }
+  .skin-panel { border-color: #b84aff !important; box-shadow: 0 0 60px rgba(184,74,255,0.3) !important; }
+  .skin-panel h2 { color: #d89aff !important; }
+  #skin-items {
+    display: grid; grid-template-columns: repeat(5, 1fr); gap: 12px;
+    margin-bottom: 22px; max-height: 65vh; overflow-y: auto;
+  }
+  .skin-card {
+    background: #080810; border: 2px solid #333;
+    padding: 10px; text-align: center; font-family: monospace;
+    cursor: pointer;
+  }
+  .skin-card.owned { border-color: #56a456; }
+  .skin-card.equipped { border-color: #b84aff; box-shadow: 0 0 18px rgba(184,74,255,0.5); }
+  .skin-card h4 { margin: 6px 0 4px; color: #fff; letter-spacing: 1px; font-size: 13px; font-weight: bold; }
+  .skin-card .skin-preview {
+    width: 100%; height: 100px; position: relative;
+    background: linear-gradient(180deg, #1a1625 0%, #0a0815 100%);
+    border: 1px solid #333; margin-bottom: 6px; overflow: hidden;
+  }
+  .skin-preview .silhouette {
+    position: absolute; left: 50%; bottom: 6px; transform: translateX(-50%);
+    width: 40px;
+  }
+  .skin-card .price { font-size: 11px; color: #ffd500; letter-spacing: 1px; }
+  .skin-card .price.real-money { color: #ff88ff; }
+  .skin-card button {
+    background: #ffd500; color: #000; border: none; padding: 5px 8px;
+    cursor: pointer; font-family: monospace; font-weight: bold;
+    width: 100%; letter-spacing: 1px; font-size: 11px; margin-top: 6px;
+  }
+  .skin-card button:disabled { background: #333; color: #888; cursor: not-allowed; }
+  .skin-card.equipped button { background: #b84aff; color: #fff; }
+  .skin-card.owned:not(.equipped) button { background: #56a456; color: #fff; }
+  #skin-close {
+    background: transparent; color: #fff; border: 2px solid #fff;
+    padding: 10px 36px; cursor: pointer; font-family: monospace;
+    font-size: 16px; letter-spacing: 4px;
+  }
   #loot {
     position: absolute; inset: 0; background: rgba(0,0,0,0.92);
     display: flex; align-items: center; justify-content: center; z-index: 10;
@@ -396,6 +445,14 @@
   <div class="hotbar-slot" id="hotbar-1">2</div>
   <div class="hotbar-slot" id="hotbar-2">3</div>
 </div>
+<div id="skin-shop" class="hidden">
+  <div class="shop-panel skin-panel">
+    <h2>SKIN SHOP</h2>
+    <div class="shop-coins">YOU HAVE: $<span id="skin-coins">0</span></div>
+    <div id="skin-items"></div>
+    <button id="skin-close">BACK</button>
+  </div>
+</div>
 <div id="leaderboard" class="hidden">
   <div class="shop-panel lb-panel">
     <h2>LEADERBOARD</h2>
@@ -431,6 +488,7 @@
     <div id="wallet">
       <button id="shop-btn">SHOP</button>
       <button id="loot-btn">LOOT</button>
+      <button id="skins-btn">SKINS</button>
       <span id="coins-display">$0</span>
     </div>
     <div id="mp-row">
@@ -756,6 +814,581 @@ document.getElementById('shop-close').addEventListener('click', (e) => {
   shopEl.classList.add('hidden');
 });
 shopEl.addEventListener('click', (e) => e.stopPropagation());
+
+// =====================  SKIN SHOP  =====================
+// Each skin has a cost (coins), an optional real-money price, a preview-SVG, and a build function
+// that populates a THREE.Group with a full-body avatar used in multiplayer.
+
+function buildSkin_default(group, tintColor) {
+  const body = new THREE.Mesh(
+    new THREE.CapsuleGeometry(0.32, 0.9, 6, 10),
+    new THREE.MeshStandardMaterial({ color: tintColor, roughness: 0.7 })
+  );
+  body.position.y = 1.05; body.castShadow = true; body.receiveShadow = true;
+  group.add(body);
+  const head = new THREE.Mesh(
+    new THREE.SphereGeometry(0.26, 14, 12),
+    new THREE.MeshStandardMaterial({ color: 0xffd4a0, roughness: 0.6 })
+  );
+  head.position.y = 1.85; head.castShadow = true;
+  group.add(head);
+  const eye = new THREE.Mesh(
+    new THREE.BoxGeometry(0.18, 0.05, 0.05),
+    new THREE.MeshStandardMaterial({ color: 0x111111 })
+  );
+  eye.position.set(0, 1.88, 0.22);
+  group.add(eye);
+}
+
+function buildSkin_ninja(group) {
+  // Black gi top
+  const gi = new THREE.Mesh(new THREE.BoxGeometry(0.55, 0.6, 0.35), new THREE.MeshStandardMaterial({ color: 0x111416, roughness: 0.85 }));
+  gi.position.y = 1.2; gi.castShadow = true;
+  group.add(gi);
+  // Red belt
+  const belt = new THREE.Mesh(new THREE.BoxGeometry(0.58, 0.06, 0.37), new THREE.MeshStandardMaterial({ color: 0xc41e2a, roughness: 0.5, metalness: 0.1 }));
+  belt.position.y = 0.94;
+  group.add(belt);
+  // Black pants
+  const pants = new THREE.Mesh(new THREE.BoxGeometry(0.45, 0.7, 0.3), new THREE.MeshStandardMaterial({ color: 0x0a0a0c, roughness: 0.9 }));
+  pants.position.y = 0.5; pants.castShadow = true;
+  group.add(pants);
+  // Head / hood
+  const hood = new THREE.Mesh(new THREE.SphereGeometry(0.3, 16, 12), new THREE.MeshStandardMaterial({ color: 0x0a0a0c, roughness: 0.95 }));
+  hood.position.y = 1.85; hood.castShadow = true;
+  group.add(hood);
+  // Red headband
+  const band = new THREE.Mesh(new THREE.TorusGeometry(0.28, 0.03, 8, 20), new THREE.MeshStandardMaterial({ color: 0xc41e2a, roughness: 0.6 }));
+  band.position.y = 1.93; band.rotation.x = Math.PI / 2;
+  group.add(band);
+  // Exposed eye strip
+  const eyeSlit = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.05, 0.04), new THREE.MeshStandardMaterial({ color: 0xffe0c8 }));
+  eyeSlit.position.set(0, 1.83, 0.28);
+  group.add(eyeSlit);
+  // Katana hilt on back
+  const hilt = new THREE.Mesh(new THREE.CylinderGeometry(0.025, 0.025, 0.3, 6), new THREE.MeshStandardMaterial({ color: 0x2a1a0a }));
+  hilt.position.set(0, 1.45, -0.2); hilt.rotation.x = 0.5;
+  group.add(hilt);
+}
+
+function buildSkin_robot(group) {
+  const steel = new THREE.MeshStandardMaterial({ color: 0x8a9098, metalness: 0.92, roughness: 0.25 });
+  const dark = new THREE.MeshStandardMaterial({ color: 0x2a2e34, metalness: 0.8, roughness: 0.4 });
+  const glow = new THREE.MeshStandardMaterial({ color: 0x00ddff, emissive: 0x00ddff, emissiveIntensity: 1.8, roughness: 0.2 });
+  // Torso
+  const torso = new THREE.Mesh(new THREE.BoxGeometry(0.6, 0.75, 0.38), steel);
+  torso.position.y = 1.25; torso.castShadow = true;
+  group.add(torso);
+  // Chest panel
+  const panel = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.25, 0.02), glow);
+  panel.position.set(0, 1.32, 0.2);
+  group.add(panel);
+  // Legs
+  const pelvis = new THREE.Mesh(new THREE.BoxGeometry(0.55, 0.18, 0.35), dark);
+  pelvis.position.y = 0.8;
+  group.add(pelvis);
+  const leg = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.7, 0.3), steel);
+  leg.position.y = 0.45;
+  group.add(leg);
+  // Shoulders
+  for (const s of [-1, 1]) {
+    const sh = new THREE.Mesh(new THREE.SphereGeometry(0.12, 10, 8), steel);
+    sh.position.set(s * 0.35, 1.55, 0);
+    group.add(sh);
+  }
+  // Head
+  const head = new THREE.Mesh(new THREE.BoxGeometry(0.38, 0.34, 0.34), steel);
+  head.position.y = 1.88; head.castShadow = true;
+  group.add(head);
+  // Visor
+  const visor = new THREE.Mesh(new THREE.BoxGeometry(0.32, 0.08, 0.02), glow);
+  visor.position.set(0, 1.9, 0.18);
+  group.add(visor);
+  // Antenna
+  const ant = new THREE.Mesh(new THREE.CylinderGeometry(0.015, 0.015, 0.2, 6), dark);
+  ant.position.y = 2.1;
+  group.add(ant);
+  const antBall = new THREE.Mesh(new THREE.SphereGeometry(0.04, 10, 8), new THREE.MeshStandardMaterial({ color: 0xff2a2a, emissive: 0xff2a2a, emissiveIntensity: 1.5 }));
+  antBall.position.y = 2.22;
+  group.add(antBall);
+}
+
+function buildSkin_astronaut(group) {
+  const suit = new THREE.MeshStandardMaterial({ color: 0xf4f4f4, roughness: 0.85 });
+  const dark = new THREE.MeshStandardMaterial({ color: 0x1a1a1a, roughness: 0.8 });
+  const visor = new THREE.MeshStandardMaterial({ color: 0x2a3a4a, roughness: 0.15, metalness: 0.8, emissive: 0x44ccff, emissiveIntensity: 0.15 });
+  // Puffy body
+  const body = new THREE.Mesh(new THREE.CapsuleGeometry(0.4, 0.8, 8, 14), suit);
+  body.position.y = 1.15; body.castShadow = true;
+  group.add(body);
+  // Ridges (suit joints)
+  for (const y of [0.85, 1.15, 1.45]) {
+    const ring = new THREE.Mesh(new THREE.TorusGeometry(0.42, 0.02, 6, 18), dark);
+    ring.position.y = y; ring.rotation.x = Math.PI / 2;
+    group.add(ring);
+  }
+  // Backpack
+  const pack = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.55, 0.2), new THREE.MeshStandardMaterial({ color: 0xc8c8c8, roughness: 0.7 }));
+  pack.position.set(0, 1.2, -0.3); pack.castShadow = true;
+  group.add(pack);
+  // Helmet
+  const helm = new THREE.Mesh(new THREE.SphereGeometry(0.34, 18, 16), suit);
+  helm.position.y = 1.85; helm.castShadow = true;
+  group.add(helm);
+  // Visor
+  const visorMesh = new THREE.Mesh(new THREE.SphereGeometry(0.3, 18, 12, 0, Math.PI * 2, 0, Math.PI / 2.1), visor);
+  visorMesh.position.y = 1.88; visorMesh.rotation.x = 0.3;
+  group.add(visorMesh);
+  // Flag patch
+  const flag = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.08, 0.02), new THREE.MeshStandardMaterial({ color: 0xc41e2a }));
+  flag.position.set(-0.2, 1.35, 0.22);
+  group.add(flag);
+  const flag2 = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.08, 0.02), new THREE.MeshStandardMaterial({ color: 0x1a3a9a }));
+  flag2.position.set(0.2, 1.35, 0.22);
+  group.add(flag2);
+}
+
+function buildSkin_knight(group) {
+  const armor = new THREE.MeshStandardMaterial({ color: 0xb8bac0, metalness: 0.9, roughness: 0.3 });
+  const dark = new THREE.MeshStandardMaterial({ color: 0x4a4e56, roughness: 0.7 });
+  const gold = new THREE.MeshStandardMaterial({ color: 0xd4af37, metalness: 0.95, roughness: 0.2 });
+  // Breastplate
+  const chest = new THREE.Mesh(new THREE.BoxGeometry(0.6, 0.7, 0.4), armor);
+  chest.position.y = 1.2; chest.castShadow = true;
+  group.add(chest);
+  // Gold cross
+  const crossV = new THREE.Mesh(new THREE.BoxGeometry(0.04, 0.4, 0.02), gold);
+  crossV.position.set(0, 1.2, 0.22);
+  group.add(crossV);
+  const crossH = new THREE.Mesh(new THREE.BoxGeometry(0.22, 0.04, 0.02), gold);
+  crossH.position.set(0, 1.25, 0.22);
+  group.add(crossH);
+  // Shoulder pauldrons
+  for (const s of [-1, 1]) {
+    const p = new THREE.Mesh(new THREE.SphereGeometry(0.16, 12, 10, 0, Math.PI * 2, 0, Math.PI / 2), armor);
+    p.position.set(s * 0.35, 1.5, 0); p.castShadow = true;
+    group.add(p);
+  }
+  // Legs / greaves
+  const leg = new THREE.Mesh(new THREE.BoxGeometry(0.48, 0.78, 0.32), dark);
+  leg.position.y = 0.5; leg.castShadow = true;
+  group.add(leg);
+  // Helmet (visored)
+  const helm = new THREE.Mesh(new THREE.CylinderGeometry(0.26, 0.22, 0.4, 14), armor);
+  helm.position.y = 1.9; helm.castShadow = true;
+  group.add(helm);
+  // T-shaped visor slit
+  const slitV = new THREE.Mesh(new THREE.BoxGeometry(0.04, 0.18, 0.02), dark);
+  slitV.position.set(0, 1.92, 0.22);
+  group.add(slitV);
+  const slitH = new THREE.Mesh(new THREE.BoxGeometry(0.24, 0.05, 0.02), dark);
+  slitH.position.set(0, 1.98, 0.22);
+  group.add(slitH);
+  // Plume
+  const plume = new THREE.Mesh(new THREE.ConeGeometry(0.06, 0.25, 8), new THREE.MeshStandardMaterial({ color: 0xc41e2a, roughness: 0.7 }));
+  plume.position.y = 2.2;
+  group.add(plume);
+  // Cape
+  const cape = new THREE.Mesh(new THREE.PlaneGeometry(0.7, 1.2), new THREE.MeshStandardMaterial({ color: 0xc41e2a, roughness: 0.9, side: THREE.DoubleSide }));
+  cape.position.set(0, 1.1, -0.22); cape.rotation.x = 0.08;
+  group.add(cape);
+}
+
+function buildSkin_cowboy(group) {
+  const jacket = new THREE.MeshStandardMaterial({ color: 0x8b5a2b, roughness: 0.9 });
+  const pants = new THREE.MeshStandardMaterial({ color: 0x3a4e7a, roughness: 0.85 });
+  const hat = new THREE.MeshStandardMaterial({ color: 0x6a4a2a, roughness: 0.85 });
+  const skin = new THREE.MeshStandardMaterial({ color: 0xe4b78a, roughness: 0.7 });
+  // Body
+  const torso = new THREE.Mesh(new THREE.BoxGeometry(0.56, 0.65, 0.38), jacket);
+  torso.position.y = 1.2; torso.castShadow = true;
+  group.add(torso);
+  // Vest / bandana chest patch
+  const bandana = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.1, 0.01), new THREE.MeshStandardMaterial({ color: 0xc41e2a }));
+  bandana.position.set(0, 1.5, 0.2);
+  group.add(bandana);
+  // Belt buckle
+  const buckle = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.07, 0.02), new THREE.MeshStandardMaterial({ color: 0xd4af37, metalness: 0.9, roughness: 0.2 }));
+  buckle.position.set(0, 0.9, 0.2);
+  group.add(buckle);
+  // Pants
+  const leg = new THREE.Mesh(new THREE.BoxGeometry(0.48, 0.75, 0.32), pants);
+  leg.position.y = 0.5; leg.castShadow = true;
+  group.add(leg);
+  // Head
+  const head = new THREE.Mesh(new THREE.SphereGeometry(0.26, 14, 12), skin);
+  head.position.y = 1.88; head.castShadow = true;
+  group.add(head);
+  // Mustache
+  const stache = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.03, 0.03), new THREE.MeshStandardMaterial({ color: 0x3a2514 }));
+  stache.position.set(0, 1.82, 0.23);
+  group.add(stache);
+  // Hat — wide brim + dome
+  const brim = new THREE.Mesh(new THREE.CylinderGeometry(0.4, 0.4, 0.04, 16), hat);
+  brim.position.y = 2.05; brim.castShadow = true;
+  group.add(brim);
+  const dome = new THREE.Mesh(new THREE.CylinderGeometry(0.22, 0.24, 0.22, 14), hat);
+  dome.position.y = 2.18; dome.castShadow = true;
+  group.add(dome);
+  // Hat band
+  const hband = new THREE.Mesh(new THREE.TorusGeometry(0.24, 0.02, 6, 16), new THREE.MeshStandardMaterial({ color: 0x2a1a0a }));
+  hband.position.y = 2.08; hband.rotation.x = Math.PI / 2;
+  group.add(hband);
+}
+
+function buildSkin_wizard(group) {
+  const robe = new THREE.MeshStandardMaterial({ color: 0x3a1e6a, roughness: 0.85 });
+  const gold = new THREE.MeshStandardMaterial({ color: 0xffdd55, metalness: 0.6, roughness: 0.4, emissive: 0xaa7700, emissiveIntensity: 0.3 });
+  const skin = new THREE.MeshStandardMaterial({ color: 0xe4b78a, roughness: 0.7 });
+  // Flowing robe (cone)
+  const robeBottom = new THREE.Mesh(new THREE.ConeGeometry(0.55, 1.3, 14), robe);
+  robeBottom.position.y = 0.7; robeBottom.castShadow = true;
+  group.add(robeBottom);
+  // Upper torso
+  const chest = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.45, 0.38), robe);
+  chest.position.y = 1.45;
+  group.add(chest);
+  // Gold sash / trim
+  const sash = new THREE.Mesh(new THREE.BoxGeometry(0.52, 0.07, 0.4), gold);
+  sash.position.y = 1.25;
+  group.add(sash);
+  // Head
+  const head = new THREE.Mesh(new THREE.SphereGeometry(0.25, 14, 12), skin);
+  head.position.y = 1.82; head.castShadow = true;
+  group.add(head);
+  // Long beard
+  for (let i = 0; i < 4; i++) {
+    const b = new THREE.Mesh(new THREE.SphereGeometry(0.11 - i * 0.015, 10, 8), new THREE.MeshStandardMaterial({ color: 0xf0f0f0, roughness: 0.9 }));
+    b.position.set(0, 1.7 - i * 0.12, 0.17 - i * 0.02);
+    group.add(b);
+  }
+  // Pointed hat
+  const hat = new THREE.Mesh(new THREE.ConeGeometry(0.28, 0.7, 14), robe);
+  hat.position.y = 2.3; hat.castShadow = true;
+  group.add(hat);
+  // Stars on hat
+  for (let i = 0; i < 3; i++) {
+    const star = new THREE.Mesh(new THREE.SphereGeometry(0.03, 8, 6), gold);
+    const a = (i / 3) * Math.PI * 2;
+    star.position.set(Math.sin(a) * 0.16, 2.2 + i * 0.1, Math.cos(a) * 0.16);
+    group.add(star);
+  }
+  // Hat tip ball
+  const tip = new THREE.Mesh(new THREE.SphereGeometry(0.05, 10, 8), gold);
+  tip.position.y = 2.7;
+  group.add(tip);
+}
+
+function buildSkin_darthvader(group) {
+  const black = new THREE.MeshStandardMaterial({ color: 0x0a0a0a, roughness: 0.6, metalness: 0.3 });
+  const chrome = new THREE.MeshStandardMaterial({ color: 0x1a1a1e, metalness: 0.95, roughness: 0.15 });
+  const red = new THREE.MeshStandardMaterial({ color: 0xff1a1a, emissive: 0xff0000, emissiveIntensity: 1.8 });
+  const silver = new THREE.MeshStandardMaterial({ color: 0xc0c0c8, metalness: 0.9, roughness: 0.2 });
+  // Torso
+  const torso = new THREE.Mesh(new THREE.BoxGeometry(0.6, 0.78, 0.42), black);
+  torso.position.y = 1.2; torso.castShadow = true;
+  group.add(torso);
+  // Chest control panel (rectangular with colored lights)
+  const panel = new THREE.Mesh(new THREE.BoxGeometry(0.28, 0.18, 0.02), silver);
+  panel.position.set(0, 1.32, 0.22);
+  group.add(panel);
+  const lights = [0xff2a2a, 0x33ff33, 0x33aaff, 0xffdd33];
+  lights.forEach((col, i) => {
+    const l = new THREE.Mesh(new THREE.BoxGeometry(0.04, 0.04, 0.01), new THREE.MeshStandardMaterial({ color: col, emissive: col, emissiveIntensity: 1.2 }));
+    l.position.set(-0.09 + i * 0.06, 1.32, 0.235);
+    group.add(l);
+  });
+  // Belt
+  const belt = new THREE.Mesh(new THREE.BoxGeometry(0.62, 0.09, 0.44), silver);
+  belt.position.y = 0.92;
+  group.add(belt);
+  // Legs
+  const leg = new THREE.Mesh(new THREE.BoxGeometry(0.48, 0.75, 0.34), black);
+  leg.position.y = 0.5; leg.castShadow = true;
+  group.add(leg);
+  // Helmet — dome
+  const helmTop = new THREE.Mesh(new THREE.SphereGeometry(0.28, 18, 14, 0, Math.PI * 2, 0, Math.PI * 0.6), chrome);
+  helmTop.position.y = 1.9;
+  group.add(helmTop);
+  // Helmet mid (box)
+  const helmMid = new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.25, 0.42), chrome);
+  helmMid.position.y = 1.75;
+  group.add(helmMid);
+  // Triangular "mouth"
+  const mouth = new THREE.Mesh(new THREE.BoxGeometry(0.18, 0.06, 0.02), silver);
+  mouth.position.set(0, 1.72, 0.23);
+  group.add(mouth);
+  // Triangular eye visors
+  for (const s of [-1, 1]) {
+    const e = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.06, 0.02), red);
+    e.position.set(s * 0.1, 1.85, 0.24);
+    e.rotation.z = s * 0.3;
+    group.add(e);
+  }
+  // Cape (long)
+  const cape = new THREE.Mesh(new THREE.PlaneGeometry(0.85, 1.8), new THREE.MeshStandardMaterial({ color: 0x050505, roughness: 0.95, side: THREE.DoubleSide }));
+  cape.position.set(0, 1.0, -0.25); cape.rotation.x = 0.05;
+  group.add(cape);
+  // Red lightsaber in hand
+  const saber = new THREE.Mesh(new THREE.CylinderGeometry(0.025, 0.025, 0.14, 8), chrome);
+  saber.position.set(0.35, 1.05, 0.2);
+  group.add(saber);
+  const blade = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.03, 0.9, 8), red);
+  blade.position.set(0.35, 1.6, 0.2);
+  group.add(blade);
+}
+
+function buildSkin_thanos(group) {
+  const purple = new THREE.MeshStandardMaterial({ color: 0x5d4d9a, roughness: 0.6 });
+  const purpleDk = new THREE.MeshStandardMaterial({ color: 0x3a2e66, roughness: 0.7 });
+  const armor = new THREE.MeshStandardMaterial({ color: 0xd4ab44, metalness: 0.9, roughness: 0.3 });
+  const gold = new THREE.MeshStandardMaterial({ color: 0xe8c868, metalness: 0.95, roughness: 0.15 });
+  // Big massive torso
+  const chest = new THREE.Mesh(new THREE.BoxGeometry(0.85, 0.85, 0.55), armor);
+  chest.position.y = 1.25; chest.castShadow = true;
+  group.add(chest);
+  // Purple undershirt peek
+  const shirt = new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.3, 0.02), purple);
+  shirt.position.set(0, 1.4, 0.28);
+  group.add(shirt);
+  // Broad shoulders
+  for (const s of [-1, 1]) {
+    const sh = new THREE.Mesh(new THREE.SphereGeometry(0.2, 14, 12, 0, Math.PI * 2, 0, Math.PI / 2), armor);
+    sh.position.set(s * 0.48, 1.6, 0); sh.castShadow = true;
+    group.add(sh);
+  }
+  // Arms
+  for (const s of [-1, 1]) {
+    const arm = new THREE.Mesh(new THREE.CylinderGeometry(0.13, 0.13, 0.75, 10), purple);
+    arm.position.set(s * 0.55, 1.15, 0); arm.castShadow = true;
+    group.add(arm);
+  }
+  // Infinity Gauntlet (right hand)
+  const gauntlet = new THREE.Mesh(new THREE.BoxGeometry(0.26, 0.3, 0.24), gold);
+  gauntlet.position.set(0.55, 0.72, 0); gauntlet.castShadow = true;
+  group.add(gauntlet);
+  // Gems on gauntlet
+  const gems = [0xff3030, 0xffb820, 0x9a2aff, 0x44ff88, 0x44aaff, 0xff66dd];
+  gems.forEach((col, i) => {
+    const g = new THREE.Mesh(new THREE.SphereGeometry(0.035, 10, 8), new THREE.MeshStandardMaterial({ color: col, emissive: col, emissiveIntensity: 1.5 }));
+    g.position.set(0.55 + (i - 2.5) * 0.04, 0.85, 0.14);
+    group.add(g);
+  });
+  // Legs
+  const leg = new THREE.Mesh(new THREE.BoxGeometry(0.58, 0.7, 0.45), purpleDk);
+  leg.position.y = 0.45; leg.castShadow = true;
+  group.add(leg);
+  // Head — big
+  const head = new THREE.Mesh(new THREE.SphereGeometry(0.34, 18, 14), purple);
+  head.position.y = 1.9; head.castShadow = true;
+  group.add(head);
+  // Chin ridges
+  for (let i = 0; i < 3; i++) {
+    const r = new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.03, 0.02), purpleDk);
+    r.position.set(0, 1.7 - i * 0.04, 0.3);
+    group.add(r);
+  }
+  // Eyes
+  for (const s of [-1, 1]) {
+    const e = new THREE.Mesh(new THREE.SphereGeometry(0.035, 8, 8), new THREE.MeshStandardMaterial({ color: 0xf0e4ff, emissive: 0xaaaaff, emissiveIntensity: 0.5 }));
+    e.position.set(s * 0.12, 1.95, 0.3);
+    group.add(e);
+  }
+}
+
+function buildSkin_goku(group) {
+  const orange = new THREE.MeshStandardMaterial({ color: 0xff7a1a, roughness: 0.75 });
+  const blue = new THREE.MeshStandardMaterial({ color: 0x1a3aaa, roughness: 0.7 });
+  const skin = new THREE.MeshStandardMaterial({ color: 0xf4c896, roughness: 0.75 });
+  const hair = new THREE.MeshStandardMaterial({ color: 0x1a1a1a, roughness: 0.9 });
+  const aura = new THREE.MeshBasicMaterial({ color: 0x44ccff, transparent: true, opacity: 0.25, blending: THREE.AdditiveBlending, depthWrite: false });
+  // Orange gi top
+  const gi = new THREE.Mesh(new THREE.BoxGeometry(0.58, 0.65, 0.38), orange);
+  gi.position.y = 1.25; gi.castShadow = true;
+  group.add(gi);
+  // Blue undershirt peek
+  const shirt = new THREE.Mesh(new THREE.BoxGeometry(0.35, 0.55, 0.02), blue);
+  shirt.position.set(0, 1.25, 0.21);
+  group.add(shirt);
+  // Blue belt
+  const belt = new THREE.Mesh(new THREE.BoxGeometry(0.62, 0.12, 0.41), blue);
+  belt.position.y = 0.88;
+  group.add(belt);
+  // Orange pants
+  const pants = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.72, 0.34), orange);
+  pants.position.y = 0.5; pants.castShadow = true;
+  group.add(pants);
+  // Blue boots
+  for (const s of [-1, 1]) {
+    const boot = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.16, 0.32), blue);
+    boot.position.set(s * 0.13, 0.08, 0.02);
+    group.add(boot);
+  }
+  // Arms
+  for (const s of [-1, 1]) {
+    const arm = new THREE.Mesh(new THREE.CylinderGeometry(0.09, 0.09, 0.65, 10), orange);
+    arm.position.set(s * 0.38, 1.22, 0);
+    group.add(arm);
+    const hand = new THREE.Mesh(new THREE.SphereGeometry(0.1, 10, 8), skin);
+    hand.position.set(s * 0.38, 0.88, 0);
+    group.add(hand);
+  }
+  // Head
+  const head = new THREE.Mesh(new THREE.SphereGeometry(0.26, 14, 12), skin);
+  head.position.y = 1.88; head.castShadow = true;
+  group.add(head);
+  // Spiky hair — multiple cones
+  const spikes = 9;
+  for (let i = 0; i < spikes; i++) {
+    const a = (i / spikes) * Math.PI * 2;
+    const len = 0.15 + (Math.random() - 0.5) * 0.08;
+    const cone = new THREE.Mesh(new THREE.ConeGeometry(0.08, len, 6), hair);
+    cone.position.set(Math.sin(a) * 0.18, 2.02 + Math.cos(i * 1.3) * 0.02, Math.cos(a) * 0.18);
+    cone.lookAt(cone.position.x * 2, cone.position.y + 0.4, cone.position.z * 2);
+    cone.rotateX(Math.PI / 2);
+    group.add(cone);
+  }
+  // Top spike
+  const topSpike = new THREE.Mesh(new THREE.ConeGeometry(0.09, 0.22, 6), hair);
+  topSpike.position.y = 2.12;
+  group.add(topSpike);
+  // Blue energy aura
+  const auraMesh = new THREE.Mesh(new THREE.SphereGeometry(0.6, 16, 12), aura);
+  auraMesh.position.y = 1.2;
+  group.add(auraMesh);
+  // Eyes
+  for (const s of [-1, 1]) {
+    const e = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.04, 0.02), new THREE.MeshStandardMaterial({ color: 0x1a1a1a }));
+    e.position.set(s * 0.08, 1.9, 0.24);
+    group.add(e);
+  }
+}
+
+const SKINS = {
+  default:    { name: 'DEFAULT',    cost: 0,   builder: buildSkin_default,    tint: 'byColor',
+                preview: '<div class="silhouette" style="height:90px;background:linear-gradient(180deg,#ffd4a0 30%,#ff6a8a 32%,#ff6a8a 100%);border-radius:12px 12px 3px 3px;"></div>' },
+  ninja:      { name: 'NINJA',      cost: 20,  builder: buildSkin_ninja,
+                preview: '<div class="silhouette" style="height:90px;background:linear-gradient(180deg,#0a0a0c 30%,#141414 32%,#141414 66%,#0a0a0c 100%);border-radius:14px 14px 3px 3px;box-shadow:inset 0 32px 0 -28px #c41e2a;"></div>' },
+  robot:      { name: 'ROBOT',      cost: 60,  builder: buildSkin_robot,
+                preview: '<div class="silhouette" style="height:90px;background:linear-gradient(180deg,#8a9098 32%,#2a2e34 34%,#8a9098 100%);border-radius:4px;box-shadow:inset 0 0 0 2px #00ddff;"></div>' },
+  astronaut:  { name: 'ASTRONAUT',  cost: 150, builder: buildSkin_astronaut,
+                preview: '<div class="silhouette" style="height:90px;background:linear-gradient(180deg,#f4f4f4 35%,#c8c8c8 100%);border-radius:50% 50% 6px 6px;box-shadow:inset 0 24px 0 -14px #2a3a4a;"></div>' },
+  knight:     { name: 'KNIGHT',     cost: 280, builder: buildSkin_knight,
+                preview: '<div class="silhouette" style="height:90px;background:linear-gradient(180deg,#b8bac0 32%,#4a4e56 34%,#b8bac0 100%);border-radius:10px 10px 3px 3px;box-shadow:0 -6px 0 -2px #c41e2a;"></div>' },
+  cowboy:     { name: 'COWBOY',     cost: 450, builder: buildSkin_cowboy,
+                preview: '<div class="silhouette" style="height:90px;background:linear-gradient(180deg,#6a4a2a 10%,#8b5a2b 24%,#3a4e7a 66%);border-radius:8px 8px 3px 3px;box-shadow:inset 0 8px 0 -4px #6a4a2a;"></div>' },
+  wizard:     { name: 'WIZARD',     cost: 700, builder: buildSkin_wizard,
+                preview: '<div class="silhouette" style="height:90px;background:linear-gradient(180deg,#3a1e6a 40%,#3a1e6a 100%);clip-path:polygon(50% 0,95% 100%,5% 100%);"></div>' },
+  darthvader: { name: 'DARTH VADER', cost: 0, realMoneyCents: 199, builder: buildSkin_darthvader,
+                preview: '<div class="silhouette" style="height:90px;background:#0a0a0a;border-radius:50% 50% 4px 4px;box-shadow:inset 0 28px 0 -22px #ff1a1a;"></div>' },
+  thanos:     { name: 'THANOS',     cost: 0, realMoneyCents: 249, builder: buildSkin_thanos,
+                preview: '<div class="silhouette" style="height:90px;background:linear-gradient(180deg,#5d4d9a 30%,#d4ab44 32%,#5d4d9a 70%);border-radius:10px;"></div>' },
+  goku:       { name: 'GOKU',       cost: 0, realMoneyCents: 299, builder: buildSkin_goku,
+                preview: '<div class="silhouette" style="height:90px;background:linear-gradient(180deg,#1a1a1a 18%,#f4c896 22%,#ff7a1a 34%,#1a3aaa 68%,#ff7a1a 100%);border-radius:14px 14px 3px 3px;"></div>' },
+};
+
+// Stripe Payment Links for real-money skins (optional, set per-skin)
+const SKIN_PAYMENT_URLS = {
+  darthvader: null,  // 'https://buy.stripe.com/xxx?client_reference_id=darthvader'
+  thanos:     null,
+  goku:       null,
+};
+
+let ownedSkins;
+try { ownedSkins = JSON.parse(localStorage.getItem('fpsOwnedSkins')); } catch (_) {}
+if (!Array.isArray(ownedSkins)) ownedSkins = ['default'];
+if (!ownedSkins.includes('default')) ownedSkins.push('default');
+let selectedSkin = localStorage.getItem('fpsSelectedSkin') || 'default';
+if (!ownedSkins.includes(selectedSkin) || !SKINS[selectedSkin]) selectedSkin = 'default';
+function saveSkinShop() {
+  localStorage.setItem('fpsOwnedSkins', JSON.stringify(ownedSkins));
+  localStorage.setItem('fpsSelectedSkin', selectedSkin);
+}
+
+// Grant a real-money skin if the URL came back with ?skin=<id>
+(function checkSkinUnlock() {
+  const url = new URL(window.location.href);
+  const paid = url.searchParams.get('skin');
+  if (paid && SKINS[paid]) {
+    if (!ownedSkins.includes(paid)) {
+      ownedSkins.push(paid);
+      selectedSkin = paid;
+      saveSkinShop();
+    }
+    url.searchParams.delete('skin');
+    history.replaceState({}, '', url.toString());
+  }
+})();
+
+const skinShopEl = document.getElementById('skin-shop');
+const skinItemsEl = document.getElementById('skin-items');
+const skinCoinsEl = document.getElementById('skin-coins');
+
+function renderSkinShop() {
+  skinCoinsEl.textContent = coins;
+  skinItemsEl.innerHTML = '';
+  for (const [id, sk] of Object.entries(SKINS)) {
+    const owned = ownedSkins.includes(id);
+    const equipped = selectedSkin === id;
+    const isRM = sk.realMoneyCents && sk.realMoneyCents > 0;
+    const card = document.createElement('div');
+    card.className = 'skin-card' + (owned ? ' owned' : '') + (equipped ? ' equipped' : '');
+    let label, priceLine;
+    if (equipped) label = 'EQUIPPED';
+    else if (owned) label = 'EQUIP';
+    else if (isRM) label = `BUY $${(sk.realMoneyCents / 100).toFixed(2)} 💳`;
+    else label = coins >= sk.cost ? `BUY $${sk.cost}` : `NEED $${sk.cost}`;
+    if (id === 'default') priceLine = '<div class="price">FREE</div>';
+    else if (isRM) priceLine = `<div class="price real-money">$${(sk.realMoneyCents / 100).toFixed(2)} REAL</div>`;
+    else priceLine = `<div class="price">$${sk.cost}</div>`;
+    card.innerHTML = `
+      <div class="skin-preview">${sk.preview}</div>
+      <h4>${sk.name}</h4>
+      ${priceLine}
+      <button data-skin="${id}" ${(!owned && !isRM && coins < sk.cost) ? 'disabled' : ''}>${label}</button>
+    `;
+    skinItemsEl.appendChild(card);
+  }
+  skinItemsEl.querySelectorAll('button').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const id = btn.dataset.skin;
+      const sk = SKINS[id];
+      if (!ownedSkins.includes(id)) {
+        if (sk.realMoneyCents) {
+          const url = SKIN_PAYMENT_URLS[id];
+          if (url) window.open(url, '_blank');
+          else alert(`Real-money purchase for the ${sk.name} skin is not yet configured.\n\nCreate a $${(sk.realMoneyCents/100).toFixed(2)} Stripe Payment Link, paste its URL into SKIN_PAYMENT_URLS['${id}'] in index.html, and set its success URL to this site with ?skin=${id}.`);
+          return;
+        }
+        if (coins >= sk.cost) {
+          coins -= sk.cost;
+          ownedSkins.push(id);
+          selectedSkin = id;
+          saveSkinShop();
+          localStorage.setItem('fpsCoins', String(coins));
+          coinsDisplay.textContent = '$' + coins;
+          coinsHudEl.textContent = coins;
+          renderSkinShop();
+        }
+      } else if (selectedSkin !== id) {
+        selectedSkin = id;
+        saveSkinShop();
+        renderSkinShop();
+      }
+    });
+  });
+}
+document.getElementById('skins-btn').addEventListener('click', (e) => {
+  e.stopPropagation();
+  renderSkinShop();
+  skinShopEl.classList.remove('hidden');
+});
+document.getElementById('skin-close').addEventListener('click', (e) => {
+  e.stopPropagation();
+  skinShopEl.classList.add('hidden');
+});
+skinShopEl.addEventListener('click', (e) => e.stopPropagation());
 
 // Loot modal
 const lootEl = document.getElementById('loot');
@@ -4967,31 +5600,24 @@ function mpColorFor(id) {
   return new THREE.Color().setHSL(((h % 360) + 360) % 360 / 360, 0.65, 0.55);
 }
 
+function mpBuildAvatar(group, skinId, color) {
+  // Clear any existing children
+  while (group.children.length) {
+    const c = group.children[0];
+    group.remove(c);
+    if (c.geometry) c.geometry.dispose();
+    if (c.material) c.material.dispose();
+  }
+  const skin = SKINS[skinId] || SKINS.default;
+  if (skin.tint === 'byColor') skin.builder(group, color);
+  else skin.builder(group);
+}
+
 function mpAddRemote(peerId) {
   if (mpState.remotes.has(peerId) || peerId === mpState.peer?.id) return;
   const group = new THREE.Group();
   const color = mpColorFor(peerId);
-  const body = new THREE.Mesh(
-    new THREE.CapsuleGeometry(0.32, 0.9, 6, 10),
-    new THREE.MeshStandardMaterial({ color, roughness: 0.7 })
-  );
-  body.position.y = 1.05;
-  body.castShadow = true; body.receiveShadow = true;
-  group.add(body);
-  const head = new THREE.Mesh(
-    new THREE.SphereGeometry(0.26, 14, 12),
-    new THREE.MeshStandardMaterial({ color: 0xffd4a0, roughness: 0.6 })
-  );
-  head.position.y = 1.85;
-  head.castShadow = true;
-  group.add(head);
-  // Eye indicator so you can see which way they're facing
-  const eye = new THREE.Mesh(
-    new THREE.BoxGeometry(0.18, 0.05, 0.05),
-    new THREE.MeshStandardMaterial({ color: 0x111111 })
-  );
-  eye.position.set(0, 1.88, 0.22);
-  group.add(eye);
+  mpBuildAvatar(group, 'default', color);
   group.position.set(0, 0, 0);
   scene.add(group);
   const tag = document.createElement('div');
@@ -5000,7 +5626,7 @@ function mpAddRemote(peerId) {
   tag.style.color = '#' + color.getHexString();
   document.body.appendChild(tag);
   mpState.remotes.set(peerId, {
-    group, head, body, tag, color,
+    group, tag, color, skin: 'default',
     current: { x: 0, y: 0, z: 0, yaw: 0 },
     target:  { x: 0, y: 0, z: 0, yaw: 0 },
   });
@@ -5020,7 +5646,7 @@ function mpRemoveRemote(peerId) {
 function mpPlayerSnapshot() {
   const e = new THREE.Euler(0, 0, 0, 'YXZ');
   e.setFromQuaternion(camera.quaternion);
-  return { x: camera.position.x, y: camera.position.y, z: camera.position.z, yaw: e.y, name: playerDisplayName };
+  return { x: camera.position.x, y: camera.position.y, z: camera.position.z, yaw: e.y, name: playerDisplayName, skin: selectedSkin };
 }
 
 function mpApplyRemoteState(peerId, state) {
@@ -5034,6 +5660,10 @@ function mpApplyRemoteState(peerId, state) {
   if (state.name && r.tag && r.tag.dataset.name !== state.name) {
     r.tag.textContent = state.name.slice(0, 16);
     r.tag.dataset.name = state.name;
+  }
+  if (state.skin && SKINS[state.skin] && r.skin !== state.skin) {
+    r.skin = state.skin;
+    mpBuildAvatar(r.group, state.skin, r.color);
   }
 }
 
