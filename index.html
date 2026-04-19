@@ -158,6 +158,35 @@
   }
   .respawn-panel h2 { margin: 0 0 14px; color: #ff2a88; letter-spacing: 8px; font-size: 32px; }
   #respawn-timer { color: #c6b4ff; letter-spacing: 4px; font-size: 22px; }
+  #battle-waiting {
+    position: absolute; inset: 0; background: rgba(0,0,0,0.88);
+    display: flex; align-items: center; justify-content: center; z-index: 20;
+  }
+  #battle-waiting.hidden { display: none; }
+  .battle-waiting-panel {
+    background: #10101a; border: 3px solid #ffb020;
+    box-shadow: 0 0 60px rgba(255,176,32,0.4);
+    padding: 36px 64px; text-align: center; font-family: monospace; min-width: 380px;
+  }
+  .battle-waiting-panel h2 { margin: 0 0 16px; color: #ffb020; letter-spacing: 10px; font-size: 36px; }
+  #battle-count { color: #fff; letter-spacing: 6px; font-size: 44px; margin: 8px 0 12px; }
+  #battle-hint { color: #ffcc66; letter-spacing: 2px; margin: 6px 0 22px; font-size: 13px; }
+  #battle-cancel {
+    background: transparent; color: #fff; border: 2px solid #ffb020;
+    padding: 10px 22px; font-family: monospace; font-size: 13px;
+    cursor: pointer; letter-spacing: 3px; font-weight: bold;
+  }
+  #battle-cancel:hover { background: rgba(255,176,32,0.2); }
+  #battle-cancel.disabled { opacity: 0.35; cursor: not-allowed; pointer-events: none; }
+  #battle-eliminated {
+    position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+    background: rgba(10,0,0,0.88); border: 3px solid #ff2a88;
+    padding: 24px 44px; color: #ff9ec8; font-family: monospace;
+    font-size: 20px; letter-spacing: 4px; z-index: 18;
+    pointer-events: none; text-align: center;
+  }
+  #battle-eliminated.hidden { display: none; }
+  #battle-eliminated .big { color: #ff2a88; font-size: 34px; letter-spacing: 8px; display: block; margin-bottom: 10px; }
   #mp-waiting {
     position: absolute; inset: 0; background: rgba(0,0,0,0.85);
     display: flex; align-items: center; justify-content: center; z-index: 16;
@@ -460,6 +489,18 @@
     <div id="respawn-timer">Respawning in 3…</div>
   </div>
 </div>
+<div id="battle-waiting" class="hidden">
+  <div class="battle-waiting-panel">
+    <h2>BATTLE</h2>
+    <div id="battle-count">1 / 12</div>
+    <div id="battle-hint">Waiting for 11 other players…</div>
+    <button id="battle-cancel">CANCEL</button>
+  </div>
+</div>
+<div id="battle-eliminated" class="hidden">
+  <span class="big">ELIMINATED</span>
+  <span id="battle-elim-sub">Spectating until the match ends</span>
+</div>
 <div id="mp-waiting" class="hidden">
   <div class="mp-waiting-panel">
     <h2>WAITING</h2>
@@ -523,6 +564,7 @@
       <button class="gm-btn" data-gm="normal">NORMAL</button>
       <button class="gm-btn" data-gm="waves">WAVES</button>
       <button class="gm-btn" data-gm="freestyle">FREESTYLE</button>
+      <button class="gm-btn" data-gm="battle">BATTLE</button>
     </div>
     <div id="mode-row">
       <button class="mode-btn" data-mode="day">DAY</button>
@@ -613,7 +655,7 @@ if (!Array.isArray(ownedModes)) ownedModes = ['day'];
 if (!ownedModes.includes('day')) ownedModes.push('day');
 
 let mode = localStorage.getItem('fpsMode') || 'day';
-const GAME_MODES = ['normal', 'waves', 'freestyle'];
+const GAME_MODES = ['normal', 'waves', 'freestyle', 'battle'];
 let gameMode = localStorage.getItem('fpsGameMode') || 'normal';
 if (!GAME_MODES.includes(gameMode)) gameMode = 'normal';
 document.querySelectorAll('.gm-btn').forEach(btn => {
@@ -630,7 +672,7 @@ document.querySelectorAll('.gm-btn').forEach(btn => {
       localStorage.setItem('fpsGameMode', gameMode);
       document.querySelectorAll('.gm-btn').forEach(b => b.classList.toggle('active', b.dataset.gm === gameMode));
       // Switching to 1v1 clears any leftover zombies on this host; guests will mirror via next snapshot.
-      if (gameMode === 'freestyle') { try { mpClearLocalZombies(); } catch (_) {} }
+      if (gameMode === 'freestyle' || gameMode === 'battle') { try { mpClearLocalZombies(); } catch (_) {} }
     } else {
       localStorage.setItem('fpsGameMode', btn.dataset.gm);
       location.reload();
@@ -3580,7 +3622,12 @@ let mpReady = false;
 let mpGameStarted = false;
 
 function startGame() {
-  // 1v1 requires multiplayer (at least one friend)
+  // BATTLE is a 12-player battle royale with automatic matchmaking.
+  if (gameMode === 'battle') {
+    try { startBattleMatchmaking(); } catch (e) { console.error(e); }
+    return;
+  }
+  // FREESTYLE requires multiplayer (at least one friend)
   if (gameMode === 'freestyle' && (!mpState || !mpState.peer)) {
     try { showPowerMsg('FREESTYLE NEEDS A FRIEND — HOST OR JOIN A ROOM', '#ff2a88'); } catch (_) {}
     return;
@@ -3657,10 +3704,15 @@ controls.addEventListener('unlock', () => {
   if (gameOver) return;
   // Respawning: the respawn overlay is already showing; don't double up with pause.
   if (typeof respawning !== 'undefined' && respawning) return;
+  // Eliminated in BATTLE: overlay already shown, no pause UI needed.
+  if (gameMode === 'battle' && battleState && battleState.eliminated) return;
   const inMultiplayer = mpState.peer !== null;
   if (inMultiplayer) {
-    if (gameMode === 'freestyle') {
-      // 1v1 MP: allow quit via pause overlay. Game keeps running for the other player.
+    if (gameMode === 'battle' && battleState && battleState.started) {
+      // BATTLE: no quit allowed mid-match — just re-acquire lock.
+      document.getElementById('mp-click-resume').classList.remove('hidden');
+    } else if (gameMode === 'freestyle') {
+      // FREESTYLE: allow quit via pause overlay. Game keeps running for the other player.
       document.getElementById('pause-overlay').classList.remove('hidden');
     } else {
       // Co-op MP: game keeps running. Just prompt the player to re-acquire pointer lock.
@@ -4042,7 +4094,7 @@ if (gameMode === 'normal') {
 } else if (gameMode === 'waves') {
   startWave(0);
 }
-// 1v1 spawns no zombies — it's a player-vs-player mode
+// FREESTYLE and BATTLE spawn no zombies — player-vs-player modes
 
 const mysteryBalls = [];
 const activePowers = new Map();
@@ -4528,10 +4580,11 @@ const timeEl = document.getElementById('time');
 const coinsHudEl = document.getElementById('coins');
 coinsHudEl.textContent = coins;
 updateAmmoHUD();
-let timeLeft = gameMode === 'freestyle' ? 0 : 120;
+let timeLeft = (gameMode === 'freestyle' || gameMode === 'battle') ? 0 : 120;
 const timeLabelEl = document.getElementById('time-label');
 if (gameMode === 'waves') { timeLabelEl.textContent = 'Wave 1:'; timeEl.textContent = '30s'; }
 else if (gameMode === 'freestyle') { timeLabelEl.textContent = 'Time:'; timeEl.textContent = '∞ (0s)'; }
+else if (gameMode === 'battle') { timeLabelEl.textContent = 'Alive:'; timeEl.textContent = '—'; }
 else { timeLabelEl.textContent = 'Time:'; timeEl.textContent = '120s'; }
 let gameOver = false;
 let recoil = 0;
@@ -4615,7 +4668,12 @@ function damagePlayer(amount) {
   flashDamageOverlay();
   playZombieHit();
   if (playerState.lives <= 0) {
-    // 1v1 MP: don't end the match — eliminate this player and respawn after 3s.
+    // BATTLE: eliminate without respawn — wait for match to end.
+    if (gameMode === 'battle' && battleState && battleState.started) {
+      battleEliminateSelf();
+      return;
+    }
+    // FREESTYLE: don't end the match — eliminate this player and respawn after 3s.
     if (gameMode === 'freestyle' && mpState && mpState.peer) {
       beginRespawn();
       return;
@@ -4689,6 +4747,7 @@ function softRestart() {
   if (gameMode === 'normal') { timeLeft = 120; if (timeEl) timeEl.textContent = '120s'; if (timeLabelEl) timeLabelEl.textContent = 'Time:'; }
   else if (gameMode === 'waves') { waveTimeLeft = 30; currentWaveIdx = 0; if (timeLabelEl) timeLabelEl.textContent = 'Wave 1:'; if (timeEl) timeEl.textContent = '30s'; }
   else if (gameMode === 'freestyle') { timeLeft = 0; if (timeEl) timeEl.textContent = '∞ (0s)'; if (timeLabelEl) timeLabelEl.textContent = 'Time:'; }
+  else if (gameMode === 'battle') { timeLeft = 0; if (timeEl) timeEl.textContent = '—'; if (timeLabelEl) timeLabelEl.textContent = 'Alive:'; }
   // Clear zombies on every client
   for (const t of targets) scene.remove(t);
   targets.length = 0;
@@ -4888,7 +4947,7 @@ function rayCastFirst(dirWorld) {
   const origin = camera.position.clone();
   raycaster.set(origin, dirWorld);
   // In 1v1 MP, remote player avatars become valid raycast targets
-  const pvpGroups = (gameMode === 'freestyle' && mpState && mpState.peer)
+  const pvpGroups = ((gameMode === 'freestyle' || gameMode === 'battle') && mpState && mpState.peer)
     ? Array.from(mpState.remotes.values()).map(r => r.group) : [];
   const hits = raycaster.intersectObjects([...targets, ...mysteryBalls, ...walls, ...pvpGroups], true);
   if (!hits.length) return null;
@@ -4926,9 +4985,15 @@ function resolveHit(hitInfo, damage) {
 
 function mpSendPlayerHit(peerId, damage) {
   if (!mpState || !mpState.peer) return;
-  const conn = mpState.isHost ? mpState.conns.get(peerId) : mpState.hostConn;
-  if (conn && conn.open) {
-    try { conn.send({ type: 'playerHit', damage: damage || 1, shooterId: mpState.peer.id }); } catch (_) {}
+  if (mpState.isHost) {
+    // Host → guest: send directly to the targeted guest's connection.
+    const conn = mpState.conns.get(peerId);
+    if (conn && conn.open) {
+      try { conn.send({ type: 'playerHit', damage: damage || 1, shooterId: mpState.peer.id }); } catch (_) {}
+    }
+  } else if (mpState.hostConn && mpState.hostConn.open) {
+    // Guest → host or guest → guest: route via host. Host relays if target !== host.
+    try { mpState.hostConn.send({ type: 'playerHit', damage: damage || 1, shooterId: mpState.peer.id, targetId: peerId }); } catch (_) {}
   }
 }
 
@@ -5031,7 +5096,7 @@ function shoot() {
 
 
   raycaster.setFromCamera(new THREE.Vector2(0, 0), camera);
-  const pvpGroups = (gameMode === 'freestyle' && mpState && mpState.peer)
+  const pvpGroups = ((gameMode === 'freestyle' || gameMode === 'battle') && mpState && mpState.peer)
     ? Array.from(mpState.remotes.values()).map(r => r.group) : [];
   const hits = raycaster.intersectObjects([...targets, ...mysteryBalls, ...walls, ...pvpGroups], true);
   const endWorld = hits.length
@@ -5963,6 +6028,7 @@ function mpApplyRemoteState(peerId, state) {
 }
 
 function mpHandleDataFromGuest(conn, msg) {
+  if (battleHandleMsgFromGuest(conn, msg)) return;
   if (msg.type === 'state') {
     conn._latest = msg.p;
     // Update waiting text if still waiting
@@ -5970,8 +6036,18 @@ function mpHandleDataFromGuest(conn, msg) {
     // Host-side: when a guest's ready flag arrives, the next snapshot cycle will start the game
     mpHostStartCheck();
   } else if (msg.type === 'playerHit') {
-    // A guest shot the host — apply damage locally
-    damagePlayer(msg.damage || 1);
+    // A guest shot someone. If targetId is missing or equals host's id, host takes damage.
+    // Otherwise relay the hit to the targeted guest.
+    const hostId = mpState.peer && mpState.peer.id;
+    const targetId = msg.targetId;
+    if (!targetId || targetId === hostId) {
+      damagePlayer(msg.damage || 1);
+    } else {
+      const relay = mpState.conns.get(targetId);
+      if (relay && relay.open) {
+        try { relay.send({ type: 'playerHit', damage: msg.damage || 1, shooterId: msg.shooterId }); } catch (_) {}
+      }
+    }
   } else if (msg.type === 'hit' && typeof damageTarget === 'function') {
     // Host: apply damage to zombie by zid
     const t = targets.find(z => z.userData.zid === msg.zid);
@@ -5989,6 +6065,7 @@ function mpHandleDataFromGuest(conn, msg) {
   }
 }
 function mpHandleDataFromHost(msg) {
+  if (battleHandleMsgFromHost(msg)) return;
   if (msg.type === 'playerHit') {
     damagePlayer(msg.damage || 1);
     return;
@@ -6007,7 +6084,7 @@ function mpHandleDataFromHost(msg) {
       else if (gameMode === 'waves') { timeLabelEl.textContent = 'Wave 1:'; timeEl.textContent = '30s'; }
       else { timeLabelEl.textContent = 'Time:'; timeLeft = 120; timeEl.textContent = '120s'; }
       // 1v1 has no zombies — clear any that were pre-spawned from a prior mode.
-      if (gameMode === 'freestyle') { try { mpClearLocalZombies(); } catch (_) {} }
+      if (gameMode === 'freestyle' || gameMode === 'battle') { try { mpClearLocalZombies(); } catch (_) {} }
     }
     mpActuallyStart();
     return;
@@ -6018,7 +6095,7 @@ function mpHandleDataFromHost(msg) {
       gameMode = msg.gameMode;
       if (typeof refreshGameModeButtons === 'function') refreshGameModeButtons();
       // If we just entered 1v1, drop any leftover zombies immediately.
-      if (gameMode === 'freestyle') { try { mpClearLocalZombies(); } catch (_) {} }
+      if (gameMode === 'freestyle' || gameMode === 'battle') { try { mpClearLocalZombies(); } catch (_) {} }
     }
     if (typeof msg.timeLeft === 'number') timeLeft = msg.timeLeft;
     if (typeof msg.waveTimeLeft === 'number') waveTimeLeft = msg.waveTimeLeft;
@@ -6197,6 +6274,339 @@ function mpHost() {
 }
 
 function id(p) { return p && p.id ? p.id : '?'; }
+
+// ================ BATTLE ROYALE MATCHMAKING =================
+// 12-player BR using a well-known PeerJS lobby ID as rendezvous. First to register
+// becomes host; everyone else joins as guest. Host starts the match when 12 peers
+// are connected (self + 11 guests), broadcasts 'battleStart', and enforces "no
+// leaving" UI on all clients. Last player alive wins $100.
+const BATTLE_LOBBY_ID = 'RETROCLYPSE-BATTLE-LOBBY';
+const BATTLE_SIZE = 12;
+const BATTLE_REWARD = 100;
+const battleState = {
+  active: false,        // matchmaking or in-match
+  started: false,       // game actually running
+  eliminated: false,    // this player is out
+  aliveCount: 0,
+  winnerId: null,
+  roster: [],           // list of peer IDs in this match
+  connectTimeoutId: null,
+  retries: 0,
+};
+
+function battleUpdateHud(count) {
+  const el = document.getElementById('battle-count');
+  const hint = document.getElementById('battle-hint');
+  const cancelBtn = document.getElementById('battle-cancel');
+  if (el) el.textContent = `${count} / ${BATTLE_SIZE}`;
+  if (hint) hint.textContent = count >= BATTLE_SIZE
+    ? 'Match starting…'
+    : `Waiting for ${BATTLE_SIZE - count} more player${BATTLE_SIZE - count === 1 ? '' : 's'}…`;
+  if (cancelBtn) cancelBtn.classList.toggle('disabled', count >= BATTLE_SIZE);
+}
+
+function battleShowWaiting() {
+  const ov = document.getElementById('battle-waiting');
+  if (ov) ov.classList.remove('hidden');
+  battleUpdateHud(1);
+}
+function battleHideWaiting() {
+  const ov = document.getElementById('battle-waiting');
+  if (ov) ov.classList.add('hidden');
+}
+
+function battleTeardownPeer() {
+  if (battleState.connectTimeoutId) { clearTimeout(battleState.connectTimeoutId); battleState.connectTimeoutId = null; }
+  try {
+    for (const id2 of Array.from(mpState.remotes.keys())) mpRemoveRemote(id2);
+    if (mpState.hostConn) { try { mpState.hostConn.close(); } catch (_) {} }
+    for (const c of mpState.conns.values()) { try { c.close(); } catch (_) {} }
+    if (mpState.peer) { try { mpState.peer.destroy(); } catch (_) {} }
+  } catch (_) {}
+  mpState.peer = null;
+  mpState.hostConn = null;
+  mpState.conns.clear();
+  mpState.isHost = false;
+  mpState.isJoined = false;
+  mpHostBtn.disabled = false;
+  mpJoinBtn.disabled = false;
+  mpUpdateHud();
+}
+
+function battleCancel() {
+  if (battleState.started) return; // can't cancel once started
+  battleState.active = false;
+  battleHideWaiting();
+  battleTeardownPeer();
+  menu.classList.remove('hidden');
+}
+
+function battleBroadcastRoster() {
+  if (!mpState.isHost) return;
+  const peers = [mpState.peer.id, ...Array.from(mpState.conns.keys())];
+  const msg = { type: 'battleRoster', peers };
+  for (const c of mpState.conns.values()) { try { c.send(msg); } catch (_) {} }
+  battleUpdateHud(peers.length);
+}
+
+function battleHostTryStart() {
+  if (!mpState.isHost || battleState.started) return;
+  const count = 1 + mpState.conns.size;
+  if (count < BATTLE_SIZE) return;
+  battleState.started = true;
+  battleState.roster = [mpState.peer.id, ...Array.from(mpState.conns.keys())];
+  battleState.aliveCount = battleState.roster.length;
+  const startMsg = { type: 'battleStart', roster: battleState.roster };
+  for (const c of mpState.conns.values()) { try { c.send(startMsg); } catch (_) {} }
+  battleStartLocal();
+}
+
+function battleStartLocal() {
+  battleState.started = true;
+  battleState.eliminated = false;
+  battleState.winnerId = null;
+  playerState.lives = playerState.maxLives;
+  updateLivesHUD();
+  // No zombies in battle
+  for (const t of targets) scene.remove(t);
+  targets.length = 0;
+  battleHideWaiting();
+  document.getElementById('battle-eliminated').classList.add('hidden');
+  playing = true;
+  mpGameStarted = true;
+  renderer.domElement.focus();
+  try { controls.lock(); } catch (_) {}
+  startMusic();
+}
+
+function battleEliminateSelf() {
+  if (battleState.eliminated) return;
+  battleState.eliminated = true;
+  playing = false;
+  try { controls.unlock(); } catch (_) {}
+  const el = document.getElementById('battle-eliminated');
+  if (el) el.classList.remove('hidden');
+  const sub = document.getElementById('battle-elim-sub');
+  if (sub) sub.textContent = 'Spectating until the match ends';
+  // Tell host
+  const msg = { type: 'battleEliminated', peerId: mpState.peer.id };
+  if (mpState.isHost) {
+    battleHostOnElimination(mpState.peer.id);
+  } else if (mpState.hostConn) {
+    try { mpState.hostConn.send(msg); } catch (_) {}
+  }
+}
+
+function battleHostOnElimination(peerId) {
+  if (!mpState.isHost) return;
+  battleState.aliveCount = Math.max(0, battleState.aliveCount - 1);
+  if (battleState.aliveCount <= 1) {
+    // Find the sole survivor
+    let winner = null;
+    if (!battleState.eliminated) winner = mpState.peer.id;
+    if (!winner) {
+      for (const [pid, conn] of mpState.conns.entries()) {
+        if (conn._eliminated) continue;
+        if (pid === peerId) continue;
+        winner = pid;
+        break;
+      }
+    }
+    battleState.winnerId = winner;
+    const name = winner === mpState.peer.id ? playerDisplayName : (mpState.remotes.get(winner)?.name || 'Unknown');
+    const winMsg = { type: 'battleWinner', winnerId: winner, winnerName: name };
+    for (const c of mpState.conns.values()) { try { c.send(winMsg); } catch (_) {} }
+    battleHandleWinner(winner, name);
+  }
+}
+
+function battleHandleWinner(winnerId, winnerName) {
+  battleState.winnerId = winnerId;
+  const iAmWinner = mpState.peer && winnerId === mpState.peer.id;
+  const headline = iAmWinner
+    ? `<strong>YOU WON THE BATTLE!</strong><br />+$${BATTLE_REWARD}`
+    : `<strong>BATTLE OVER</strong><br />${(winnerName || 'A player')} WON`;
+  if (iAmWinner) {
+    coins += BATTLE_REWARD;
+    coinsHudEl.textContent = coins;
+    coinsDisplay.textContent = '$' + coins;
+    saveShop();
+  }
+  // Tear down peer fully (frees the well-known lobby id for the next match).
+  battleState.active = false;
+  battleState.started = false;
+  battleState.eliminated = false;
+  const elim = document.getElementById('battle-eliminated');
+  if (elim) elim.classList.add('hidden');
+  battleHideWaiting();
+  setTimeout(() => {
+    battleTeardownPeer();
+    returnToLobby(headline);
+  }, 100);
+}
+
+function startBattleMatchmaking() {
+  if (battleState.active) return;
+  if (typeof Peer === 'undefined') { try { showPowerMsg('PEERJS NOT LOADED', '#ff2a88'); } catch (_) {} return; }
+  if (mpState.peer) {
+    // Tear down any existing FREESTYLE/coop session first
+    battleTeardownPeer();
+  }
+  battleState.active = true;
+  battleState.started = false;
+  battleState.eliminated = false;
+  battleState.winnerId = null;
+  battleState.roster = [];
+  battleState.retries = 0;
+  menu.classList.add('hidden');
+  battleShowWaiting();
+  // Attempt to host on the well-known lobby id
+  battleTryHost();
+}
+
+function battleTryHost() {
+  mpState.peer = new Peer(BATTLE_LOBBY_ID);
+  mpState.isHost = true;
+  let resolved = false;
+  mpState.peer.on('open', () => {
+    if (resolved) return;
+    resolved = true;
+    mpSetStatus(`BATTLE HOST · 1 / ${BATTLE_SIZE}`);
+    mpHostBtn.disabled = true;
+    mpJoinBtn.disabled = true;
+    mpUpdateHud();
+    battleUpdateHud(1);
+  });
+  mpState.peer.on('connection', conn => {
+    // Reject connections once match is full or started
+    if (battleState.started) { try { conn.send({ type: 'battleReject', reason: 'started' }); conn.close(); } catch (_) {} return; }
+    if (mpState.conns.size + 1 >= BATTLE_SIZE) { try { conn.send({ type: 'battleReject', reason: 'full' }); conn.close(); } catch (_) {} return; }
+    conn.on('open', () => {
+      mpState.conns.set(conn.peer, conn);
+      mpAddRemote(conn.peer);
+      mpUpdateHud();
+      battleBroadcastRoster();
+      battleHostTryStart();
+    });
+    conn.on('data', msg => mpHandleDataFromGuest(conn, msg));
+    conn.on('close', () => {
+      const wasInMatch = battleState.started && !conn._eliminated;
+      mpState.conns.delete(conn.peer);
+      mpRemoveRemote(conn.peer);
+      mpUpdateHud();
+      if (battleState.started) {
+        // Treat unexpected drop as an elimination.
+        if (wasInMatch) battleHostOnElimination(conn.peer);
+      } else if (battleState.active) {
+        battleBroadcastRoster();
+      }
+    });
+    conn.on('error', () => {});
+  });
+  mpState.peer.on('error', e => {
+    const type = e && e.type ? e.type : '';
+    if (type === 'unavailable-id') {
+      // Someone else is already the BATTLE host → join them as a guest.
+      try { mpState.peer.destroy(); } catch (_) {}
+      mpState.peer = null;
+      mpState.isHost = false;
+      if (!resolved) { resolved = true; battleTryJoin(); }
+    } else {
+      mpSetStatus('Battle error: ' + type);
+    }
+  });
+}
+
+function battleTryJoin() {
+  mpState.peer = new Peer();
+  mpState.isHost = false;
+  mpState.peer.on('open', () => {
+    const conn = mpState.peer.connect(BATTLE_LOBBY_ID, { reliable: true });
+    mpState.hostConn = conn;
+    let opened = false;
+    conn.on('open', () => {
+      opened = true;
+      mpState.isJoined = true;
+      mpSetStatus('BATTLE GUEST');
+      mpHostBtn.disabled = true;
+      mpJoinBtn.disabled = true;
+      mpClearLocalZombies();
+      mpUpdateHud();
+    });
+    conn.on('data', msg => mpHandleDataFromHost(msg));
+    conn.on('close', () => {
+      for (const id2 of Array.from(mpState.remotes.keys())) mpRemoveRemote(id2);
+      if (battleState.started) {
+        // Lost host mid-match — fall back to ending the match.
+        returnToLobby('<strong>BATTLE INTERRUPTED</strong><br /><small>Host connection lost.</small>');
+        battleState.active = false;
+        battleState.started = false;
+      } else if (battleState.active) {
+        battleHideWaiting();
+        battleTeardownPeer();
+        menu.classList.remove('hidden');
+        try { showPowerMsg('BATTLE LOBBY CLOSED — TRY AGAIN', '#ff2a88'); } catch (_) {}
+        battleState.active = false;
+      }
+    });
+    conn.on('error', () => {
+      if (!opened) {
+        if (battleState.retries >= 3) {
+          battleHideWaiting();
+          battleTeardownPeer();
+          menu.classList.remove('hidden');
+          battleState.active = false;
+          try { showPowerMsg('BATTLE UNAVAILABLE — TRY AGAIN LATER', '#ff2a88'); } catch (_) {}
+          return;
+        }
+        battleState.retries++;
+        // Couldn't reach the host — the lobby might be gone. Retry hosting.
+        battleHideWaiting();
+        battleTeardownPeer();
+        try { showPowerMsg('BATTLE LOBBY UNREACHABLE — RETRYING…', '#ffb020'); } catch (_) {}
+        setTimeout(() => { if (battleState.active) { battleShowWaiting(); battleTryHost(); } }, 800);
+      }
+    });
+  });
+  mpState.peer.on('error', e => mpSetStatus('Battle join error: ' + (e && e.type ? e.type : e)));
+}
+
+// Battle message handlers — called from mpHandleDataFromHost/Guest based on msg.type
+function battleHandleMsgFromHost(msg) {
+  if (msg.type === 'battleRoster') {
+    battleState.roster = msg.peers || [];
+    battleUpdateHud(battleState.roster.length);
+    return true;
+  }
+  if (msg.type === 'battleStart') {
+    battleState.roster = msg.roster || [];
+    battleState.aliveCount = battleState.roster.length;
+    battleStartLocal();
+    return true;
+  }
+  if (msg.type === 'battleWinner') {
+    battleHandleWinner(msg.winnerId, msg.winnerName);
+    return true;
+  }
+  if (msg.type === 'battleReject') {
+    battleHideWaiting();
+    battleTeardownPeer();
+    menu.classList.remove('hidden');
+    try { showPowerMsg(msg.reason === 'full' ? 'BATTLE LOBBY FULL' : 'BATTLE ALREADY STARTED', '#ff2a88'); } catch (_) {}
+    battleState.active = false;
+    return true;
+  }
+  return false;
+}
+
+function battleHandleMsgFromGuest(conn, msg) {
+  if (msg.type === 'battleEliminated') {
+    conn._eliminated = true;
+    battleHostOnElimination(conn.peer);
+    return true;
+  }
+  return false;
+}
 
 function mpJoin(code) {
   if (mpState.peer) return;
@@ -6437,6 +6847,12 @@ document.getElementById('mp-waiting-cancel').addEventListener('click', (e) => {
   mpReady = false;
   document.getElementById('mp-waiting').classList.add('hidden');
   menu.classList.remove('hidden');
+});
+
+// BATTLE lobby cancel — only while still waiting for players.
+document.getElementById('battle-cancel').addEventListener('click', (e) => {
+  e.stopPropagation();
+  battleCancel();
 });
 
 // Pause menu wiring (solo only — MP uses click-to-resume)
