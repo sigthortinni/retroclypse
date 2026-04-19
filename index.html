@@ -464,6 +464,19 @@ if (!localStorage.getItem(GRANT_MARKER)) {
   localStorage.setItem(GRANT_MARKER, '1');
 }
 
+// Test-only: grant the lightsaber once so it can be tested without a real-money flow
+const LIGHTSABER_GRANT = 'fpsLightsaberTest';
+if (!localStorage.getItem(LIGHTSABER_GRANT)) {
+  let _owned;
+  try { _owned = JSON.parse(localStorage.getItem('fpsOwned')); } catch (_) {}
+  if (!Array.isArray(_owned)) _owned = ['pistol'];
+  if (!_owned.includes('lightsaber')) _owned.push('lightsaber');
+  localStorage.setItem('fpsOwned', JSON.stringify(_owned));
+  // Equip it as the melee slot so it's ready to swing
+  localStorage.setItem('fpsLoadoutMelee', 'lightsaber');
+  localStorage.setItem(LIGHTSABER_GRANT, '1');
+}
+
 const MODE_COSTS = { day: 0, night: 100, beach: 200, forest: 300, desert: 500, city: 750, snow: 1000 };
 let ownedModes;
 try { ownedModes = JSON.parse(localStorage.getItem('fpsOwnedModes')); } catch (_) {}
@@ -556,22 +569,31 @@ if (!Array.isArray(ownedGuns)) ownedGuns = ['pistol'];
 if (!ownedGuns.includes('pistol')) ownedGuns.push('pistol');
 let selectedGun = localStorage.getItem('fpsGun') || 'pistol';
 if (!ownedGuns.includes(selectedGun) || !GUNS[selectedGun]) selectedGun = 'pistol';
+// selectedGun represents the active GUN slot, not a melee. If somehow set to a melee, fall back.
+if (GUNS[selectedGun] && GUNS[selectedGun].category === 'melee') selectedGun = 'pistol';
 
 // Loadout: perk + up to 2 equipped guns + 1 melee
 const loadoutPerk = localStorage.getItem('fpsPerk') || null;
 let loadoutGuns;
 try { loadoutGuns = JSON.parse(localStorage.getItem('fpsLoadoutGuns')); } catch (_) {}
 if (!Array.isArray(loadoutGuns)) loadoutGuns = [];
+// If a legacy entry was a melee weapon, carry it into the melee slot
+const _legacyMelee = loadoutGuns.find(g => GUNS[g] && GUNS[g].category === 'melee' && ownedGuns.includes(g));
 // Filter to ONLY owned non-melee guns
 loadoutGuns = loadoutGuns
   .filter(g => ownedGuns.includes(g) && GUNS[g] && GUNS[g].category !== 'melee')
   .slice(0, 2);
-if (loadoutGuns.length === 0) loadoutGuns = [selectedGun];
+if (loadoutGuns.length === 0) {
+  // Fallback must be a non-melee gun
+  const fallback = (GUNS[selectedGun] && GUNS[selectedGun].category !== 'melee') ? selectedGun : 'pistol';
+  loadoutGuns = [fallback];
+}
 
 let loadoutMelee = localStorage.getItem('fpsLoadoutMelee') || '';
 if (loadoutMelee && !(ownedGuns.includes(loadoutMelee) && GUNS[loadoutMelee] && GUNS[loadoutMelee].category === 'melee')) {
   loadoutMelee = '';
 }
+if (!loadoutMelee && _legacyMelee) loadoutMelee = _legacyMelee;
 
 // Combined active loadout: slots 0,1 = guns, slot 2 = melee (if present)
 let activeGunIdx = 0;
