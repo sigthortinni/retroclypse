@@ -5398,7 +5398,8 @@ function animate() {
   requestAnimationFrame(animate);
   const dt = Math.min(clock.getDelta(), 0.1);
 
-  if (playing && !gameOver && mpIsAuthoritative()) {
+  if (playing && !gameOver) {
+   if (mpIsAuthoritative()) {
     timeAccum += dt;
     if (timeAccum >= 1) {
       timeAccum -= 1;
@@ -5459,6 +5460,7 @@ function animate() {
         timeLabelEl.textContent = `Wave ${currentWaveIdx + 1}:`;
       }
     }
+   } // end mpIsAuthoritative timer block — movement below runs for host + guests
 
     playerEuler.setFromQuaternion(camera.quaternion);
     const yaw = playerEuler.y;
