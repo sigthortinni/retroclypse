@@ -147,6 +147,14 @@
   .loot-gun:hover:not(.disabled) { border-color: #5adf8c; color: #fff; }
   .loot-gun.slot-primary { border-color: #ff2a88; background: rgba(255,42,136,0.14); color: #fff; }
   .loot-gun.slot-secondary { border-color: #00ddff; background: rgba(0,221,255,0.14); color: #fff; }
+  .loot-gun.slot-melee { border-color: #ffd500; background: rgba(255,213,0,0.14); color: #fff; }
+  .loot-subheader {
+    color: #9fff9f; font-family: monospace; letter-spacing: 4px; font-weight: bold;
+    font-size: 12px; margin: 10px 0 6px; padding-bottom: 4px;
+    border-bottom: 1px solid #4a9a4a;
+  }
+  .loot-gun-grid { display: grid; grid-template-columns: 1fr 1fr 1fr 1fr; gap: 8px; margin-bottom: 8px; }
+  .loot-empty { color: #888; font-family: monospace; font-size: 12px; padding: 8px 0; letter-spacing: 1px; }
   .loot-gun.disabled { opacity: 0.35; cursor: not-allowed; }
   .loot-gun strong { display: block; color: #fff; font-size: 13px; margin-bottom: 2px; letter-spacing: 2px; }
   .loot-gun .slot-tag { color: #ffd700; font-size: 10px; margin-top: 4px; }
@@ -165,6 +173,7 @@
     letter-spacing: 2px; min-width: 90px; text-align: center;
   }
   .hotbar-slot.active { border-color: #ff2a88; color: #fff; background: rgba(255,42,136,0.2); box-shadow: 0 0 14px rgba(255,42,136,0.45); }
+  #hotbar-2.active { border-color: #ffd500; background: rgba(255,213,0,0.2); box-shadow: 0 0 14px rgba(255,213,0,0.45); }
   .hotbar-slot.hidden-slot { display: none; }
   #mp-row {
     display: flex; gap: 8px; justify-content: center; align-items: center;
@@ -347,6 +356,7 @@
 <div id="hotbar">
   <div class="hotbar-slot" id="hotbar-0">1</div>
   <div class="hotbar-slot" id="hotbar-1">2</div>
+  <div class="hotbar-slot" id="hotbar-2">3</div>
 </div>
 <div id="leaderboard" class="hidden">
   <div class="shop-panel lb-panel">
@@ -442,6 +452,7 @@ if (!localStorage.getItem(RESET_MARKER)) {
   localStorage.removeItem('fpsGameMode');
   localStorage.removeItem('fpsPerk');
   localStorage.removeItem('fpsLoadoutGuns');
+  localStorage.removeItem('fpsLoadoutMelee');
   localStorage.setItem(RESET_MARKER, '1');
 }
 
@@ -538,19 +549,35 @@ if (!ownedGuns.includes('pistol')) ownedGuns.push('pistol');
 let selectedGun = localStorage.getItem('fpsGun') || 'pistol';
 if (!ownedGuns.includes(selectedGun) || !GUNS[selectedGun]) selectedGun = 'pistol';
 
-// Loadout: perk + up to 2 equipped guns
+// Loadout: perk + up to 2 equipped guns + 1 melee
 const loadoutPerk = localStorage.getItem('fpsPerk') || null;
 let loadoutGuns;
 try { loadoutGuns = JSON.parse(localStorage.getItem('fpsLoadoutGuns')); } catch (_) {}
 if (!Array.isArray(loadoutGuns)) loadoutGuns = [];
-loadoutGuns = loadoutGuns.filter(g => ownedGuns.includes(g) && GUNS[g]).slice(0, 2);
+// Filter to ONLY owned non-melee guns
+loadoutGuns = loadoutGuns
+  .filter(g => ownedGuns.includes(g) && GUNS[g] && GUNS[g].category !== 'melee')
+  .slice(0, 2);
 if (loadoutGuns.length === 0) loadoutGuns = [selectedGun];
+
+let loadoutMelee = localStorage.getItem('fpsLoadoutMelee') || '';
+if (loadoutMelee && !(ownedGuns.includes(loadoutMelee) && GUNS[loadoutMelee] && GUNS[loadoutMelee].category === 'melee')) {
+  loadoutMelee = '';
+}
+
+// Combined active loadout: slots 0,1 = guns, slot 2 = melee (if present)
 let activeGunIdx = 0;
 selectedGun = loadoutGuns[0];
 function saveLoadout() {
   localStorage.setItem('fpsLoadoutGuns', JSON.stringify(loadoutGuns));
+  localStorage.setItem('fpsLoadoutMelee', loadoutMelee || '');
   if (loadoutPerk) localStorage.setItem('fpsPerk', loadoutPerk);
   else localStorage.removeItem('fpsPerk');
+}
+function loadoutSlotId(idx) {
+  if (idx === 0 || idx === 1) return loadoutGuns[idx];
+  if (idx === 2) return loadoutMelee || null;
+  return null;
 }
 
 const PERK_SPEED_MULT = loadoutPerk === 'agility' ? 1.10 : 1;
@@ -704,10 +731,18 @@ function renderLoot() {
     });
     lootPerksEl.appendChild(btn);
   }
-  // Guns (only owned shown)
+  // GUNS (pick up to 2)
   lootGunsEl.innerHTML = '';
+  const gunsHeader = document.createElement('div');
+  gunsHeader.className = 'loot-subheader';
+  gunsHeader.textContent = 'GUNS — PICK UP TO 2';
+  lootGunsEl.appendChild(gunsHeader);
+  const gunsGrid = document.createElement('div');
+  gunsGrid.className = 'loot-gun-grid';
+  lootGunsEl.appendChild(gunsGrid);
   for (const [id, g] of Object.entries(GUNS)) {
     if (!ownedGuns.includes(id)) continue;
+    if (g.category === 'melee') continue;
     const slotIdx = loadoutGuns.indexOf(id);
     const card = document.createElement('div');
     card.className = 'loot-gun' +
@@ -724,13 +759,44 @@ function renderLoot() {
       } else if (loadoutGuns.length < 2) {
         loadoutGuns.push(id);
       } else {
-        // Swap secondary out
         loadoutGuns[1] = id;
       }
-      localStorage.setItem('fpsLoadoutGuns', JSON.stringify(loadoutGuns));
+      saveLoadout();
       renderLoot();
     });
-    lootGunsEl.appendChild(card);
+    gunsGrid.appendChild(card);
+  }
+  // MELEE (pick 1)
+  const meleeHeader = document.createElement('div');
+  meleeHeader.className = 'loot-subheader';
+  meleeHeader.textContent = 'MELEE — PICK 1';
+  lootGunsEl.appendChild(meleeHeader);
+  const meleeGrid = document.createElement('div');
+  meleeGrid.className = 'loot-gun-grid';
+  lootGunsEl.appendChild(meleeGrid);
+  let ownsAnyMelee = false;
+  for (const [id, g] of Object.entries(GUNS)) {
+    if (!ownedGuns.includes(id)) continue;
+    if (g.category !== 'melee') continue;
+    ownsAnyMelee = true;
+    const equipped = loadoutMelee === id;
+    const card = document.createElement('div');
+    card.className = 'loot-gun' + (equipped ? ' slot-melee' : '');
+    const tag = equipped ? '<div class="slot-tag">SLOT 3</div>' : '';
+    card.innerHTML = `<strong>${g.name}</strong>Reach: ${g.range}m${tag}`;
+    card.addEventListener('click', (e) => {
+      e.stopPropagation();
+      loadoutMelee = (loadoutMelee === id) ? '' : id;
+      saveLoadout();
+      renderLoot();
+    });
+    meleeGrid.appendChild(card);
+  }
+  if (!ownsAnyMelee) {
+    const empty = document.createElement('div');
+    empty.className = 'loot-empty';
+    empty.textContent = 'No melee weapons owned — buy one in the SHOP.';
+    lootGunsEl.appendChild(empty);
   }
 }
 document.getElementById('loot-btn').addEventListener('click', (e) => {
@@ -3225,6 +3291,8 @@ const gunStates = loadoutGuns.map(g => {
   const base = GUNS[g].ammo + PERK_AMMO_BONUS;
   return { count: base, max: base };
 });
+// Slot 2 (melee) — no ammo, just a placeholder so indexing works
+gunStates[2] = { count: 1, max: 1 };
 const ammoState = { count: gunStates[0].count, max: gunStates[0].max };
 const AMMO_CAP = Math.max(24, GUNS[selectedGun].ammo + 12);
 
@@ -4046,20 +4114,31 @@ function updateHotbar() {
   } else {
     hotbar1El.classList.add('hidden-slot');
   }
+  const hotbar2El = document.getElementById('hotbar-2');
+  if (loadoutMelee && GUNS[loadoutMelee]) {
+    hotbar2El.textContent = '3  ' + GUNS[loadoutMelee].name;
+    hotbar2El.classList.remove('hidden-slot');
+    hotbar2El.classList.toggle('active', activeGunIdx === 2);
+  } else {
+    hotbar2El.classList.add('hidden-slot');
+  }
 }
 updateHotbar();
 
 function equipGun(idx) {
-  if (!loadoutGuns[idx] || idx === activeGunIdx) return;
+  const targetId = loadoutSlotId(idx);
+  if (!targetId || idx === activeGunIdx) return;
   // Save current slot state
   gunStates[activeGunIdx].count = ammoState.count;
   gunStates[activeGunIdx].max = ammoState.max;
   activeGunIdx = idx;
-  selectedGun = loadoutGuns[idx];
+  selectedGun = targetId;
   const cfg = GUNS[selectedGun];
-  gunmetal.color.setHex(cfg.body);
-  accentMat.color.setHex(cfg.accent);
-  accentMat.emissive.setHex(cfg.accent);
+  if (cfg.category !== 'melee') {
+    gunmetal.color.setHex(cfg.body);
+    accentMat.color.setHex(cfg.accent);
+    accentMat.emissive.setHex(cfg.accent);
+  }
   ammoState.count = gunStates[idx].count;
   ammoState.max = gunStates[idx].max;
   updateAmmoHUD();
@@ -4116,6 +4195,7 @@ addEventListener('keydown', (e) => {
   if (e.code === 'KeyE') useStim();
   if (e.code === 'Digit1' || e.code === 'Numpad1') equipGun(0);
   if (e.code === 'Digit2' || e.code === 'Numpad2') equipGun(1);
+  if (e.code === 'Digit3' || e.code === 'Numpad3') equipGun(2);
 });
 
 const _tmpBox = new THREE.Box3();
