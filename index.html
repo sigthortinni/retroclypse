@@ -456,6 +456,14 @@ if (!localStorage.getItem(RESET_MARKER)) {
   localStorage.setItem(RESET_MARKER, '1');
 }
 
+// One-time bonus grant (preserves all other progress)
+const GRANT_MARKER = 'fpsGrant1000';
+if (!localStorage.getItem(GRANT_MARKER)) {
+  const existing = parseInt(localStorage.getItem('fpsCoins') || '0', 10);
+  localStorage.setItem('fpsCoins', String(existing + 1000));
+  localStorage.setItem(GRANT_MARKER, '1');
+}
+
 const MODE_COSTS = { day: 0, night: 100, beach: 200, forest: 300, desert: 500, city: 750, snow: 1000 };
 let ownedModes;
 try { ownedModes = JSON.parse(localStorage.getItem('fpsOwnedModes')); } catch (_) {}
