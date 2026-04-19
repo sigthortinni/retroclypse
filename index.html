@@ -6012,36 +6012,43 @@ function animate() {
   mpTick(dt);
 
   // Co-op spectator: follow a living friend, count down respawn, and detect team wipes.
-  if (coopSpec.active) {
-    updateSpectatorCamera();
-    const alive = coopLivingPeers();
-    // HUD refresh (timer / target name)
-    coopUpdateSpectatorLabel(alive);
-    // Keep targetIdx in range
-    if (alive.length === 0) {
-      // All friends are dead too — game over for the team.
-      coopBroadcastAllDead();
-      returnToLobby(`<strong>TEAM WIPED</strong><br />Final Score: ${score}`);
-    } else {
-      if (coopSpec.targetIdx >= alive.length) coopSpec.targetIdx = 0;
-      // NORMAL mode: respawn when 15s countdown hits zero.
-      if (gameMode === 'normal' && performance.now() >= coopSpec.respawnAt) {
-        exitCoopSpectator();
+  try {
+    if (coopSpec.active) {
+      updateSpectatorCamera();
+      const alive = coopLivingPeers();
+      // HUD refresh (timer / target name)
+      coopUpdateSpectatorLabel(alive);
+      // Keep targetIdx in range
+      if (alive.length === 0) {
+        // All friends are dead too — game over for the team.
+        coopBroadcastAllDead();
+        returnToLobby(`<strong>TEAM WIPED</strong><br />Final Score: ${score}`);
+      } else {
+        if (coopSpec.targetIdx >= alive.length) coopSpec.targetIdx = 0;
+        // NORMAL mode: respawn when 15s countdown hits zero.
+        if (gameMode === 'normal' && performance.now() >= coopSpec.respawnAt) {
+          exitCoopSpectator();
+        }
       }
     }
-  }
+  } catch (err) { console.error('[coopSpec tick]', err); coopSpec.active = false; }
 
   // Host: detect team wipe in co-op (normal/waves) when everyone is dead.
-  if (mpState && mpState.isHost && mpGameStarted && (gameMode === 'normal' || gameMode === 'waves')) {
-    let anyAlive = playerAlive;
-    for (const c of mpState.conns.values()) {
-      if (c._latest && c._latest.alive !== false) { anyAlive = true; break; }
+  try {
+    if (mpState && mpState.isHost && mpGameStarted && (gameMode === 'normal' || gameMode === 'waves')) {
+      let anyAlive = !!playerAlive;
+      if (!anyAlive) {
+        for (const c of mpState.conns.values()) {
+          // Treat missing snapshot / missing alive flag as "alive" so we don't false-trigger.
+          if (!c._latest || c._latest.alive !== false) { anyAlive = true; break; }
+        }
+      }
+      if (!anyAlive) {
+        coopBroadcastAllDead();
+        returnToLobby(`<strong>TEAM WIPED</strong><br />Final Score: ${score}`);
+      }
     }
-    if (!anyAlive) {
-      coopBroadcastAllDead();
-      returnToLobby(`<strong>TEAM WIPED</strong><br />Final Score: ${score}`);
-    }
-  }
+  } catch (err) { console.error('[host wipe check]', err); }
 
   renderer.render(scene, camera);
 }
