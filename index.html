@@ -4357,7 +4357,7 @@ function animate() {
     }
 
     // Armed zombies shoot at the player
-    const GUN_RANGE = 15;
+    const GUN_RANGE = 10;
     const GUN_COOLDOWN = 4;
     const shotBlockers = walls.filter(w => !w.userData.isFloor);
     for (const zt of targets) {
