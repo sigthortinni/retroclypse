@@ -114,6 +114,36 @@
     z-index: 5;
   }
   #heal-overlay.flash { opacity: 1; transition: opacity 0.05s; }
+  #pause-overlay {
+    position: absolute; inset: 0; background: rgba(0,0,0,0.8);
+    display: flex; align-items: center; justify-content: center; z-index: 15;
+  }
+  #pause-overlay.hidden { display: none; }
+  .pause-panel {
+    background: #10101a; border: 3px solid #ff2a88;
+    box-shadow: 0 0 60px rgba(255,42,136,0.35);
+    padding: 36px 64px; text-align: center; font-family: monospace;
+  }
+  .pause-panel h2 {
+    margin: 0 0 22px; color: #ff2a88; letter-spacing: 10px; font-size: 38px;
+  }
+  #pause-overlay button {
+    display: block; width: 100%; margin: 10px 0;
+    background: #222; color: #fff; border: 2px solid #555;
+    padding: 14px 26px; font-family: monospace; font-size: 16px;
+    cursor: pointer; letter-spacing: 3px; font-weight: bold;
+  }
+  #pause-overlay button:hover { border-color: #ff2a88; background: rgba(255,42,136,0.18); }
+  #pause-resume { border-color: #00ddff !important; color: #00ddff !important; }
+  #pause-resume:hover { background: rgba(0,221,255,0.18) !important; }
+  #mp-click-resume {
+    position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+    background: rgba(0,0,0,0.75); border: 2px solid #7a5acc;
+    padding: 18px 40px; color: #c6b4ff; font-family: monospace;
+    font-size: 20px; letter-spacing: 4px; z-index: 14;
+    cursor: pointer; font-weight: bold;
+  }
+  #mp-click-resume.hidden { display: none; }
   #loot-btn {
     background: #5adf8c; color: #08301a; border: 2px solid #5adf8c;
     padding: 8px 24px; font-family: monospace; font-size: 16px;
@@ -332,6 +362,14 @@
 </div>
 <div id="damage-overlay"></div>
 <div id="mp-hud" class="hidden"></div>
+<div id="pause-overlay" class="hidden">
+  <div class="pause-panel">
+    <h2>PAUSED</h2>
+    <button id="pause-resume">RESUME</button>
+    <button id="pause-quit">QUIT TO MAIN MENU</button>
+  </div>
+</div>
+<div id="mp-click-resume" class="hidden">Click to resume control</div>
 <div id="shield-overlay"></div>
 <div id="grenade-count" class="hidden">GRENADES: 0</div>
 <div id="stim-count">STIMS: 1  (E to heal)</div>
@@ -2847,7 +2885,16 @@ menu.addEventListener('click', (e) => {
   startGame();
 });
 controls.addEventListener('unlock', () => {
-  if (!gameOver) { playing = false; menu.classList.remove('hidden'); }
+  if (gameOver) return;
+  const inMultiplayer = mpState.peer !== null;
+  if (inMultiplayer) {
+    // MP: game keeps running. Just prompt the player to re-acquire pointer lock.
+    document.getElementById('mp-click-resume').classList.remove('hidden');
+  } else {
+    // Solo: true pause. Stop the simulation and show the pause menu.
+    playing = false;
+    document.getElementById('pause-overlay').classList.remove('hidden');
+  }
 });
 
 // Fallback mouse-look if pointer lock is blocked by the iframe
@@ -5384,6 +5431,29 @@ mpRoomCodeEl.addEventListener('keydown', (e) => {
 
 // Initial weapon visibility (gun vs melee) based on the equipped slot
 refreshGunVisibility();
+
+// Pause menu wiring (solo only — MP uses click-to-resume)
+document.getElementById('pause-resume').addEventListener('click', (e) => {
+  e.stopPropagation();
+  document.getElementById('pause-overlay').classList.add('hidden');
+  playing = true;
+  try { controls.lock(); } catch (_) {}
+});
+document.getElementById('pause-quit').addEventListener('click', (e) => {
+  e.stopPropagation();
+  location.reload();
+});
+// MP click-to-resume: re-acquire pointer lock without pausing
+document.getElementById('mp-click-resume').addEventListener('click', (e) => {
+  e.stopPropagation();
+  document.getElementById('mp-click-resume').classList.add('hidden');
+  try { controls.lock(); } catch (_) {}
+});
+controls.addEventListener('lock', () => {
+  // Hide both overlays whenever we regain pointer lock
+  document.getElementById('pause-overlay').classList.add('hidden');
+  document.getElementById('mp-click-resume').classList.add('hidden');
+});
 
 // Start the render loop now that all module state (mpState, ammoState, etc.) is initialized.
 animate();
