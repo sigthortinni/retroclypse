@@ -441,8 +441,8 @@
 import * as THREE from 'three';
 import { PointerLockControls } from 'three/addons/controls/PointerLockControls.js';
 
-// One-time full save-state reset (clears any legacy debug cash)
-const RESET_MARKER = 'fpsResetV3';
+// One-time full save-state reset (everything back to zero)
+const RESET_MARKER = 'fpsResetV4';
 if (!localStorage.getItem(RESET_MARKER)) {
   localStorage.removeItem('fpsCoins');
   localStorage.removeItem('fpsOwned');
@@ -453,36 +453,13 @@ if (!localStorage.getItem(RESET_MARKER)) {
   localStorage.removeItem('fpsPerk');
   localStorage.removeItem('fpsLoadoutGuns');
   localStorage.removeItem('fpsLoadoutMelee');
+  localStorage.removeItem('fpsStats');
+  // Also clear old grant/migration markers so nothing re-grants coins or lightsaber
+  localStorage.removeItem('fpsGrant1000');
+  localStorage.removeItem('fpsLightsaberTest');
+  localStorage.removeItem('fpsLightsaberUnequipV1');
+  localStorage.removeItem('fpsLightsaberRevokeV1');
   localStorage.setItem(RESET_MARKER, '1');
-}
-
-// One-time bonus grant (preserves all other progress)
-const GRANT_MARKER = 'fpsGrant1000';
-if (!localStorage.getItem(GRANT_MARKER)) {
-  const existing = parseInt(localStorage.getItem('fpsCoins') || '0', 10);
-  localStorage.setItem('fpsCoins', String(existing + 1000));
-  localStorage.setItem(GRANT_MARKER, '1');
-}
-
-// Remove the lightsaber from anyone who got it via the old test grant — it's a real-money item now.
-const LIGHTSABER_REVOKE = 'fpsLightsaberRevokeV1';
-if (!localStorage.getItem(LIGHTSABER_REVOKE)) {
-  let _owned;
-  try { _owned = JSON.parse(localStorage.getItem('fpsOwned')); } catch (_) {}
-  if (Array.isArray(_owned)) {
-    const i = _owned.indexOf('lightsaber');
-    if (i !== -1) {
-      _owned.splice(i, 1);
-      localStorage.setItem('fpsOwned', JSON.stringify(_owned));
-    }
-  }
-  if (localStorage.getItem('fpsLoadoutMelee') === 'lightsaber') {
-    localStorage.setItem('fpsLoadoutMelee', '');
-  }
-  if (localStorage.getItem('fpsGun') === 'lightsaber') {
-    localStorage.setItem('fpsGun', 'pistol');
-  }
-  localStorage.setItem(LIGHTSABER_REVOKE, '1');
 }
 
 const MODE_COSTS = { day: 0, night: 100, beach: 200, forest: 300, desert: 500, city: 750, snow: 1000 };
