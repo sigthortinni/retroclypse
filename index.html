@@ -144,6 +144,27 @@
     cursor: pointer; font-weight: bold;
   }
   #mp-click-resume.hidden { display: none; }
+  #mp-waiting {
+    position: absolute; inset: 0; background: rgba(0,0,0,0.85);
+    display: flex; align-items: center; justify-content: center; z-index: 16;
+  }
+  #mp-waiting.hidden { display: none; }
+  .mp-waiting-panel {
+    background: #10101a; border: 3px solid #7a5acc;
+    box-shadow: 0 0 60px rgba(122,90,204,0.35);
+    padding: 36px 56px; text-align: center; font-family: monospace;
+    min-width: 340px;
+  }
+  .mp-waiting-panel h2 {
+    margin: 0 0 14px; color: #c6b4ff; letter-spacing: 10px; font-size: 32px;
+  }
+  #mp-waiting-detail { color: #c6b4ff; letter-spacing: 2px; margin-bottom: 22px; font-size: 14px; white-space: pre-line; }
+  #mp-waiting-cancel {
+    background: transparent; color: #fff; border: 2px solid #7a5acc;
+    padding: 10px 22px; font-family: monospace; font-size: 13px;
+    cursor: pointer; letter-spacing: 3px; font-weight: bold;
+  }
+  #mp-waiting-cancel:hover { background: rgba(122,90,204,0.2); }
   #loot-btn {
     background: #5adf8c; color: #08301a; border: 2px solid #5adf8c;
     padding: 8px 24px; font-family: monospace; font-size: 16px;
@@ -419,6 +440,13 @@
   </div>
 </div>
 <div id="mp-click-resume" class="hidden">Click to resume control</div>
+<div id="mp-waiting" class="hidden">
+  <div class="mp-waiting-panel">
+    <h2>WAITING</h2>
+    <div id="mp-waiting-detail">Waiting for other players to press PLAY…</div>
+    <button id="mp-waiting-cancel">BACK TO MENU</button>
+  </div>
+</div>
 <div id="shield-overlay"></div>
 <div id="grenade-count" class="hidden">GRENADES: 0</div>
 <div id="stim-count">STIMS: 1  (E to heal)</div>
@@ -572,12 +600,33 @@ document.querySelectorAll('.gm-btn').forEach(btn => {
   if (btn.dataset.gm === gameMode) btn.classList.add('active');
   btn.addEventListener('click', (e) => {
     e.stopPropagation();
-    if (btn.dataset.gm !== gameMode) {
+    // Guests can't change the game mode — host controls it in MP
+    if (typeof mpState !== 'undefined' && mpState && mpState.isJoined) return;
+    if (btn.dataset.gm === gameMode) return;
+    // In MP (host), switch live without reloading — broadcasts to guests via next snapshot
+    const inMP = typeof mpState !== 'undefined' && mpState && mpState.peer;
+    if (inMP) {
+      gameMode = btn.dataset.gm;
+      localStorage.setItem('fpsGameMode', gameMode);
+      document.querySelectorAll('.gm-btn').forEach(b => b.classList.toggle('active', b.dataset.gm === gameMode));
+    } else {
       localStorage.setItem('fpsGameMode', btn.dataset.gm);
       location.reload();
     }
   });
 });
+
+// Update gm-btn highlight whenever gameMode changes (e.g. host-forced on guest via world snapshot)
+function refreshGameModeButtons() {
+  document.querySelectorAll('.gm-btn').forEach(b => {
+    b.classList.toggle('active', b.dataset.gm === gameMode);
+    // Guests can't click — dim their buttons slightly
+    const isGuest = typeof mpState !== 'undefined' && mpState && mpState.isJoined;
+    b.style.opacity = isGuest ? '0.6' : '';
+    b.style.cursor = isGuest ? 'not-allowed' : 'pointer';
+  });
+}
+window.refreshGameModeButtons = refreshGameModeButtons;
 if (!ownedModes.includes(mode)) {
   mode = 'day';
   localStorage.setItem('fpsMode', 'day');
@@ -3505,9 +3554,61 @@ const menu = document.getElementById('menu');
 const debugEl = document.getElementById('debug');
 renderer.domElement.tabIndex = 0;
 let playing = false;
+let mpReady = false;
+let mpGameStarted = false;
+
 function startGame() {
+  // Multiplayer: require all connected players to press PLAY before starting
+  if (mpState && mpState.peer) {
+    mpReady = true;
+    menu.classList.add('hidden');
+    const w = document.getElementById('mp-waiting');
+    if (w) w.classList.remove('hidden');
+    mpUpdateWaitingText();
+    // Guest: just signal ready via state snapshot; host will broadcast 'start' when all ready.
+    // Host: allow the authoritative check (runs each tick) to actually start the game.
+    return;
+  }
   playing = true;
   menu.classList.add('hidden');
+  renderer.domElement.focus();
+  try { controls.lock(); } catch (_) {}
+  startMusic();
+}
+
+function mpUpdateWaitingText() {
+  const el = document.getElementById('mp-waiting-detail');
+  if (!el || !mpState || !mpState.peer) return;
+  if (mpState.isHost) {
+    const total = 1 + mpState.conns.size;
+    const ready = 1 + Array.from(mpState.conns.values()).filter(c => c._latest && c._latest.ready).length;
+    const needGuests = mpState.conns.size === 0;
+    el.textContent = needGuests
+      ? `Waiting for at least one player to JOIN\nshare room code: ${mpState.peer.id}`
+      : `Players ready: ${ready} / ${total}`;
+  } else {
+    el.textContent = 'Waiting for host to start…';
+  }
+}
+
+function mpHostStartCheck() {
+  if (!mpState || !mpState.isHost || !mpReady || mpGameStarted) return;
+  if (mpState.conns.size === 0) return; // need at least one guest
+  const allReady = Array.from(mpState.conns.values()).every(c => c._latest && c._latest.ready);
+  if (!allReady) return;
+  mpGameStarted = true;
+  // Broadcast start + authoritative game mode to all guests
+  for (const c of mpState.conns.values()) {
+    try { c.send({ type: 'start', gameMode }); } catch (_) {}
+  }
+  mpActuallyStart();
+}
+
+function mpActuallyStart() {
+  mpGameStarted = true;
+  playing = true;
+  const w = document.getElementById('mp-waiting');
+  if (w) w.classList.add('hidden');
   renderer.domElement.focus();
   try { controls.lock(); } catch (_) {}
   startMusic();
@@ -4950,7 +5051,7 @@ function animate() {
   requestAnimationFrame(animate);
   const dt = Math.min(clock.getDelta(), 0.1);
 
-  if (playing && !gameOver) {
+  if (playing && !gameOver && mpIsAuthoritative()) {
     timeAccum += dt;
     if (timeAccum >= 1) {
       timeAccum -= 1;
@@ -5646,7 +5747,7 @@ function mpRemoveRemote(peerId) {
 function mpPlayerSnapshot() {
   const e = new THREE.Euler(0, 0, 0, 'YXZ');
   e.setFromQuaternion(camera.quaternion);
-  return { x: camera.position.x, y: camera.position.y, z: camera.position.z, yaw: e.y, name: playerDisplayName, skin: selectedSkin };
+  return { x: camera.position.x, y: camera.position.y, z: camera.position.z, yaw: e.y, name: playerDisplayName, skin: selectedSkin, ready: mpReady };
 }
 
 function mpApplyRemoteState(peerId, state) {
@@ -5670,6 +5771,10 @@ function mpApplyRemoteState(peerId, state) {
 function mpHandleDataFromGuest(conn, msg) {
   if (msg.type === 'state') {
     conn._latest = msg.p;
+    // Update waiting text if still waiting
+    if (!mpGameStarted && mpReady) mpUpdateWaitingText();
+    // Host-side: when a guest's ready flag arrives, the next snapshot cycle will start the game
+    mpHostStartCheck();
   } else if (msg.type === 'hit' && typeof damageTarget === 'function') {
     // Host: apply damage to zombie by zid
     const t = targets.find(z => z.userData.zid === msg.zid);
@@ -5677,7 +5782,38 @@ function mpHandleDataFromGuest(conn, msg) {
   }
 }
 function mpHandleDataFromHost(msg) {
+  if (msg.type === 'start') {
+    // Host-authoritative game mode — overrides guest's local pick
+    if (msg.gameMode && GAME_MODES.includes(msg.gameMode)) {
+      gameMode = msg.gameMode;
+      // Adjust local timer + HUD label to match host's mode
+      if (gameMode === 'freeplay') { timeLeft = 0; timeEl.textContent = '∞ (0s)'; timeLabelEl.textContent = 'Time:'; }
+      else if (gameMode === 'waves') { timeLabelEl.textContent = 'Wave 1:'; timeEl.textContent = '30s'; }
+      else { timeLabelEl.textContent = 'Time:'; timeLeft = 120; timeEl.textContent = '120s'; }
+    }
+    mpActuallyStart();
+    return;
+  }
   if (msg.type === 'world') {
+    // Host is authoritative for game mode + timers
+    if (msg.gameMode && GAME_MODES.includes(msg.gameMode) && gameMode !== msg.gameMode) {
+      gameMode = msg.gameMode;
+      if (typeof refreshGameModeButtons === 'function') refreshGameModeButtons();
+    }
+    if (typeof msg.timeLeft === 'number') timeLeft = msg.timeLeft;
+    if (typeof msg.waveTimeLeft === 'number') waveTimeLeft = msg.waveTimeLeft;
+    if (typeof msg.currentWaveIdx === 'number') currentWaveIdx = msg.currentWaveIdx;
+    // Refresh HUD to reflect host's timer
+    if (gameMode === 'waves') {
+      timeLabelEl.textContent = `Wave ${currentWaveIdx + 1}:`;
+      timeEl.textContent = waveTimeLeft + 's';
+    } else if (gameMode === 'freeplay') {
+      timeLabelEl.textContent = 'Time:';
+      timeEl.textContent = `∞ (${timeLeft}s)`;
+    } else {
+      timeLabelEl.textContent = 'Time:';
+      timeEl.textContent = timeLeft + 's';
+    }
     // Players
     const seenPlayers = new Set();
     for (const p of msg.players) {
@@ -5753,7 +5889,11 @@ function mpTick(dt) {
         max: z.userData.maxHits,
         gun: !!z.userData.hasGun,
       }));
-      const world = { type: 'world', players, zombies };
+      const world = {
+        type: 'world', players, zombies,
+        gameMode,
+        timeLeft, waveTimeLeft, currentWaveIdx,
+      };
       for (const c of mpState.conns.values()) {
         try { c.send(world); } catch (_) {}
       }
@@ -6061,6 +6201,14 @@ mpRoomCodeEl.addEventListener('keydown', (e) => {
 
 // Initial weapon visibility (gun vs melee) based on the equipped slot
 refreshGunVisibility();
+
+// Waiting-for-players cancel button: drop ready state, go back to menu
+document.getElementById('mp-waiting-cancel').addEventListener('click', (e) => {
+  e.stopPropagation();
+  mpReady = false;
+  document.getElementById('mp-waiting').classList.add('hidden');
+  menu.classList.remove('hidden');
+});
 
 // Pause menu wiring (solo only — MP uses click-to-resume)
 document.getElementById('pause-resume').addEventListener('click', (e) => {
