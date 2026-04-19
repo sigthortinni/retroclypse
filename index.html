@@ -4327,8 +4327,8 @@ function animate() {
   }
 
   const nowSec = performance.now() / 1000;
-  const ATTACK_RANGE = 1.35;
-  const ATTACK_COOLDOWN = 1.4;
+  const ATTACK_RANGE = 1.7;
+  const ATTACK_COOLDOWN = 1.0;
   if (playing && !gameOver) {
     for (const t of targets) {
       if (!t.userData.isZombie) continue;
@@ -4358,7 +4358,7 @@ function animate() {
 
     // Armed zombies shoot at the player
     const GUN_RANGE = 10;
-    const GUN_COOLDOWN = 4;
+    const GUN_COOLDOWN = 2.5;
     const shotBlockers = walls.filter(w => !w.userData.isFloor);
     for (const zt of targets) {
       if (!zt.userData.hasGun) continue;
@@ -4374,8 +4374,24 @@ function animate() {
       raycaster.far = Infinity;
       if (blocked.length) continue;
       zt.userData.lastShotTime = nowSec;
+      // Good-but-imperfect aim — closer shots hit more often
+      const HIT_AT_CLOSE = 0.85;
+      const HIT_AT_FAR = 0.45;
+      const hitChance = HIT_AT_FAR + (HIT_AT_CLOSE - HIT_AT_FAR) * (1 - dist / GUN_RANGE);
+      const isHit = Math.random() < hitChance;
+      // Tracer endpoint: exact player on hit, offset on miss
+      let tracerEnd = camera.position.clone();
+      if (!isHit) {
+        const off = 0.5 + Math.random() * 1.2;
+        const ang = Math.random() * Math.PI * 2;
+        tracerEnd.add(new THREE.Vector3(
+          Math.cos(ang) * off,
+          (Math.random() - 0.2) * off,
+          Math.sin(ang) * off
+        ));
+      }
       // Visual tracer
-      const pts = [origin.clone(), camera.position.clone()];
+      const pts = [origin.clone(), tracerEnd];
       const tracerGeo = new THREE.BufferGeometry().setFromPoints(pts);
       const tracerMat = new THREE.LineBasicMaterial({ color: 0xffcc44, transparent: true, opacity: 0.9, depthTest: false });
       const tracer = new THREE.Line(tracerGeo, tracerMat);
@@ -4397,7 +4413,7 @@ function animate() {
       g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.12);
       o.connect(g); g.connect(audioCtx.destination);
       o.start(); o.stop(audioCtx.currentTime + 0.14);
-      damagePlayer(1);
+      if (isHit) damagePlayer(1);
     }
   }
 
