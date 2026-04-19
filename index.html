@@ -4063,10 +4063,14 @@ function startWave(idx) {
     if (typeof showPowerMsg === 'function') showPowerMsg(`WAVE ${idx + 1} / ${WAVES.length}`, '#ff6644');
   } catch (_) {}
   // Co-op: if this player was spectating while waiting for the next wave, respawn them now.
-  if (coopSpec && coopSpec.active && coopSpec.awaitingWave) {
+  // _coopSpecRef is a forward-declared placeholder filled in later — safe during module init.
+  if (_coopSpecRef && _coopSpecRef.active && _coopSpecRef.awaitingWave && typeof exitCoopSpectator === 'function') {
     exitCoopSpectator();
   }
 }
+// Forward reference placeholder so startWave (which may run at module init) can safely
+// peek at the co-op spectator state without hitting TDZ on `const coopSpec` declared later.
+var _coopSpecRef = null;
 
 if (gameMode === 'normal') {
   for (let i = 0; i < TARGET_COUNT; i++) spawnTarget();
@@ -4646,6 +4650,7 @@ const coopSpec = {
   deathPos: null,         // where our body lies so we stay put in network snapshots
   deathYaw: 0,
 };
+_coopSpecRef = coopSpec; // hook the forward-ref placeholder used by startWave
 let playerAlive = true;
 
 function damagePlayer(amount) {
