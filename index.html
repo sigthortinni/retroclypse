@@ -145,6 +145,16 @@
     cursor: pointer; font-weight: bold;
   }
   #mp-click-resume.hidden { display: none; }
+  #coop-spectator {
+    position: absolute; top: 0; left: 50%; transform: translateX(-50%);
+    margin-top: 20px; background: rgba(10,0,20,0.8); border: 2px solid #6af0ff;
+    padding: 14px 28px; color: #b8f6ff; font-family: monospace;
+    font-size: 15px; letter-spacing: 3px; z-index: 16;
+    pointer-events: none; text-align: center;
+  }
+  #coop-spectator.hidden { display: none; }
+  #coop-spectator .big { color: #6af0ff; font-size: 22px; letter-spacing: 6px; display: block; margin-bottom: 6px; }
+  #coop-spectator .sub { font-size: 12px; opacity: 0.8; letter-spacing: 2px; display: block; margin-top: 6px; }
   #battle-waiting {
     position: absolute; inset: 0; background: rgba(0,0,0,0.88);
     display: flex; align-items: center; justify-content: center; z-index: 20;
@@ -470,6 +480,12 @@
   </div>
 </div>
 <div id="mp-click-resume" class="hidden">Click to resume control</div>
+<div id="coop-spectator" class="hidden">
+  <span class="big">ELIMINATED</span>
+  <div>Spectating <span id="coop-spec-name">…</span></div>
+  <div id="coop-spec-timer">RESPAWN IN 15s</div>
+  <span class="sub">← / → to switch · stay alive, team!</span>
+</div>
 <div id="battle-waiting" class="hidden">
   <div class="battle-waiting-panel">
     <h2>BATTLE</h2>
@@ -3671,6 +3687,8 @@ controls.addEventListener('unlock', () => {
   if (gameOver) return;
   // Eliminated in BATTLE: overlay already shown, no pause UI needed.
   if (gameMode === 'battle' && battleState && battleState.eliminated) return;
+  // Co-op spectator: overlay already shown, don't stack a pause UI on top.
+  if (coopSpec && coopSpec.active) return;
   const inMultiplayer = mpState.peer !== null;
   if (inMultiplayer) {
     // MP (co-op or BATTLE): no quit mid-match — just re-acquire pointer lock.
@@ -4044,6 +4062,10 @@ function startWave(idx) {
   try {
     if (typeof showPowerMsg === 'function') showPowerMsg(`WAVE ${idx + 1} / ${WAVES.length}`, '#ff6644');
   } catch (_) {}
+  // Co-op: if this player was spectating while waiting for the next wave, respawn them now.
+  if (coopSpec && coopSpec.active && coopSpec.awaitingWave) {
+    exitCoopSpectator();
+  }
 }
 
 if (gameMode === 'normal') {
@@ -4613,9 +4635,23 @@ function playZombieHit() {
   o.start(); o.stop(audioCtx.currentTime + 0.3);
 }
 
+// CO-OP SPECTATOR: in NORMAL / WAVES MP, dying doesn't end the match.
+// You watch a living friend's POV and respawn after 15s (NORMAL) or at the next wave (WAVES).
+// If every teammate dies, the whole team returns to the main menu.
+const coopSpec = {
+  active: false,          // currently spectating
+  targetIdx: 0,           // which remote peer we're following
+  respawnAt: 0,           // performance.now() timestamp for NORMAL respawn
+  awaitingWave: false,    // WAVES: waiting for next wave to respawn
+  deathPos: null,         // where our body lies so we stay put in network snapshots
+  deathYaw: 0,
+};
+let playerAlive = true;
+
 function damagePlayer(amount) {
   if (activePowers.has('phase') || activePowers.has('shield')) return;
   if (!playing || gameOver) return;
+  if (coopSpec.active) return; // already dead / spectating
   playerState.lives = Math.max(0, playerState.lives - amount);
   playerState.lastDamageTime = performance.now() / 1000;
   updateLivesHUD();
@@ -4625,6 +4661,19 @@ function damagePlayer(amount) {
     // BATTLE: eliminate without respawn — wait for match to end.
     if (gameMode === 'battle' && battleState && battleState.started) {
       battleEliminateSelf();
+      return;
+    }
+    // NORMAL / WAVES co-op: if we have at least one living friend, spectate them instead of ending.
+    if (mpState && mpState.peer && (gameMode === 'normal' || gameMode === 'waves')) {
+      const friendsAlive = coopLivingPeers();
+      if (friendsAlive.length > 0) {
+        enterCoopSpectator();
+        return;
+      }
+      // No living friends — tell the whole team the run is over.
+      coopBroadcastAllDead();
+      playerAlive = false;
+      returnToLobby(`<strong>TEAM WIPED</strong><br />Final Score: ${score}`);
       return;
     }
     gameOver = true;
@@ -4642,6 +4691,132 @@ function damagePlayer(amount) {
   }
 }
 
+function coopLivingPeers() {
+  // Return an array of peerIds for remotes that are alive (not marked dead in their latest snapshot).
+  const out = [];
+  for (const [pid, r] of mpState.remotes.entries()) {
+    if (r._alive === false) continue;
+    out.push(pid);
+  }
+  return out;
+}
+
+function enterCoopSpectator() {
+  playerAlive = false;
+  coopSpec.active = true;
+  playing = false;
+  // Remember where we fell so our avatar stays pinned there for teammates
+  try {
+    const e = new THREE.Euler(0, 0, 0, 'YXZ');
+    e.setFromQuaternion(camera.quaternion);
+    coopSpec.deathPos = { x: camera.position.x, y: camera.position.y, z: camera.position.z };
+    coopSpec.deathYaw = e.y;
+  } catch (_) {}
+  try { controls.unlock(); } catch (_) {}
+  // Pick the first living friend
+  const alive = coopLivingPeers();
+  coopSpec.targetIdx = 0;
+  if (gameMode === 'normal') {
+    coopSpec.respawnAt = performance.now() + 15000;
+    coopSpec.awaitingWave = false;
+  } else {
+    coopSpec.awaitingWave = true;
+    coopSpec.respawnAt = 0;
+  }
+  coopSpectatorShow(alive);
+  // Tell the host we're dead so they can track team status / end-of-team.
+  coopBroadcastAlive(false);
+  // Hide gun / HUD bits that don't make sense dead
+  if (typeof refreshGunVisibility === 'function') refreshGunVisibility();
+}
+
+function exitCoopSpectator() {
+  coopSpec.active = false;
+  coopSpec.awaitingWave = false;
+  playerAlive = true;
+  playerState.lives = playerState.maxLives;
+  updateLivesHUD();
+  // Teleport back to spawn and resume play
+  try { camera.position.set(SPAWN.x, 1.7, SPAWN.z); velocityY = 0; } catch (_) {}
+  playing = true;
+  document.getElementById('coop-spectator').classList.add('hidden');
+  try { controls.lock(); } catch (_) {}
+  coopBroadcastAlive(true);
+}
+
+function coopSpectatorShow(aliveList) {
+  const ov = document.getElementById('coop-spectator');
+  if (!ov) return;
+  ov.classList.remove('hidden');
+  coopUpdateSpectatorLabel(aliveList);
+}
+
+function coopUpdateSpectatorLabel(aliveListOpt) {
+  const list = aliveListOpt || coopLivingPeers();
+  const nameEl = document.getElementById('coop-spec-name');
+  const timerEl = document.getElementById('coop-spec-timer');
+  if (nameEl) {
+    if (list.length === 0) {
+      nameEl.textContent = '…';
+    } else {
+      const pid = list[Math.max(0, Math.min(coopSpec.targetIdx, list.length - 1))];
+      const r = mpState.remotes.get(pid);
+      nameEl.textContent = (r && r.tag && r.tag.dataset.name) ? r.tag.dataset.name : (pid ? pid.slice(0, 6) : 'Friend');
+    }
+  }
+  if (timerEl) {
+    if (gameMode === 'normal') {
+      const ms = Math.max(0, coopSpec.respawnAt - performance.now());
+      timerEl.textContent = `RESPAWN IN ${Math.ceil(ms / 1000)}s`;
+    } else if (gameMode === 'waves') {
+      timerEl.textContent = `RESPAWN NEXT WAVE`;
+    }
+  }
+}
+
+function coopCycleSpectator(dir) {
+  if (!coopSpec.active) return;
+  const list = coopLivingPeers();
+  if (list.length === 0) return;
+  coopSpec.targetIdx = (coopSpec.targetIdx + (dir > 0 ? 1 : -1) + list.length) % list.length;
+  coopUpdateSpectatorLabel(list);
+}
+
+function updateSpectatorCamera() {
+  if (!coopSpec.active) return;
+  const list = coopLivingPeers();
+  if (list.length === 0) return;
+  if (coopSpec.targetIdx >= list.length) coopSpec.targetIdx = 0;
+  const pid = list[coopSpec.targetIdx];
+  const r = mpState.remotes.get(pid);
+  if (!r) return;
+  const pos = r.current || r.target;
+  if (!pos) return;
+  // Stand at their position, eye height, third-person offset behind + above them.
+  const yaw = (r.target && typeof r.target.yaw === 'number') ? r.target.yaw : 0;
+  const backX = -Math.sin(yaw) * 3.0;
+  const backZ = -Math.cos(yaw) * 3.0;
+  camera.position.set(pos.x + backX, (pos.y || 0) + 2.2, pos.z + backZ);
+  // Point camera toward the friend
+  const e = new THREE.Euler(-0.2, yaw, 0, 'YXZ');
+  camera.quaternion.setFromEuler(e);
+}
+
+function coopBroadcastAlive(alive) {
+  // Our own alive state rides in mpPlayerSnapshot — host will pick it up and propagate.
+  // Nothing to send explicitly here; this hook exists so we can extend later if needed.
+}
+
+function coopBroadcastAllDead() {
+  if (!mpState || !mpState.peer) return;
+  const msg = { type: 'coopAllDead' };
+  if (mpState.isHost) {
+    for (const c of mpState.conns.values()) { try { c.send(msg); } catch (_) {} }
+  } else if (mpState.hostConn) {
+    try { mpState.hostConn.send(msg); } catch (_) {}
+  }
+}
+
 // Cache the lobby menu content so we can restore it after an MP round ends.
 let _origMenuHTML = null;
 function _cacheMenuIfNeeded() {
@@ -4656,6 +4831,13 @@ function softRestart() {
   playing = false;
   mpReady = false;
   mpGameStarted = false;
+  // Reset co-op spectator state
+  coopSpec.active = false;
+  coopSpec.awaitingWave = false;
+  coopSpec.respawnAt = 0;
+  coopSpec.deathPos = null;
+  playerAlive = true;
+  try { document.getElementById('coop-spectator').classList.add('hidden'); } catch (_) {}
   score = 0;
   if (scoreEl) scoreEl.textContent = 0;
   playerState.lives = playerState.maxLives;
@@ -5147,6 +5329,11 @@ addEventListener('keydown', (e) => {
   if (e.code === 'Digit1' || e.code === 'Numpad1') equipGun(0);
   if (e.code === 'Digit2' || e.code === 'Numpad2') equipGun(1);
   if (e.code === 'Digit3' || e.code === 'Numpad3') equipGun(2);
+  // Co-op spectator: cycle through living friends.
+  if (coopSpec.active) {
+    if (e.code === 'ArrowLeft') { coopCycleSpectator(-1); e.preventDefault(); }
+    if (e.code === 'ArrowRight') { coopCycleSpectator(1); e.preventDefault(); }
+  }
 });
 
 const _tmpBox = new THREE.Box3();
@@ -5824,6 +6011,38 @@ function animate() {
   // --- Multiplayer tick ---
   mpTick(dt);
 
+  // Co-op spectator: follow a living friend, count down respawn, and detect team wipes.
+  if (coopSpec.active) {
+    updateSpectatorCamera();
+    const alive = coopLivingPeers();
+    // HUD refresh (timer / target name)
+    coopUpdateSpectatorLabel(alive);
+    // Keep targetIdx in range
+    if (alive.length === 0) {
+      // All friends are dead too — game over for the team.
+      coopBroadcastAllDead();
+      returnToLobby(`<strong>TEAM WIPED</strong><br />Final Score: ${score}`);
+    } else {
+      if (coopSpec.targetIdx >= alive.length) coopSpec.targetIdx = 0;
+      // NORMAL mode: respawn when 15s countdown hits zero.
+      if (gameMode === 'normal' && performance.now() >= coopSpec.respawnAt) {
+        exitCoopSpectator();
+      }
+    }
+  }
+
+  // Host: detect team wipe in co-op (normal/waves) when everyone is dead.
+  if (mpState && mpState.isHost && mpGameStarted && (gameMode === 'normal' || gameMode === 'waves')) {
+    let anyAlive = playerAlive;
+    for (const c of mpState.conns.values()) {
+      if (c._latest && c._latest.alive !== false) { anyAlive = true; break; }
+    }
+    if (!anyAlive) {
+      coopBroadcastAllDead();
+      returnToLobby(`<strong>TEAM WIPED</strong><br />Final Score: ${score}`);
+    }
+  }
+
   renderer.render(scene, camera);
 }
 
@@ -5909,7 +6128,13 @@ function mpRemoveRemote(peerId) {
 function mpPlayerSnapshot() {
   const e = new THREE.Euler(0, 0, 0, 'YXZ');
   e.setFromQuaternion(camera.quaternion);
-  return { x: camera.position.x, y: camera.position.y, z: camera.position.z, yaw: e.y, name: playerDisplayName, skin: selectedSkin, ready: mpReady };
+  // If we're spectating, freeze our transmitted position to where we died so our
+  // avatar doesn't teleport along with the spectator camera.
+  const pos = (coopSpec.active && coopSpec.deathPos)
+    ? coopSpec.deathPos
+    : { x: camera.position.x, y: camera.position.y, z: camera.position.z };
+  const yaw = (coopSpec.active) ? coopSpec.deathYaw : e.y;
+  return { x: pos.x, y: pos.y, z: pos.z, yaw, name: playerDisplayName, skin: selectedSkin, ready: mpReady, alive: playerAlive };
 }
 
 function mpApplyRemoteState(peerId, state) {
@@ -5920,6 +6145,7 @@ function mpApplyRemoteState(peerId, state) {
   r.target.y = state.y;
   r.target.z = state.z;
   r.target.yaw = state.yaw;
+  if (typeof state.alive === 'boolean') r._alive = state.alive;
   if (state.name && r.tag && r.tag.dataset.name !== state.name) {
     r.tag.textContent = state.name.slice(0, 16);
     r.tag.dataset.name = state.name;
@@ -5955,10 +6181,21 @@ function mpHandleDataFromGuest(conn, msg) {
     // Host: apply damage to zombie by zid
     const t = targets.find(z => z.userData.zid === msg.zid);
     if (t) damageTarget(t, msg.damage || 1);
+  } else if (msg.type === 'coopAllDead') {
+    // A guest says the team has wiped — relay to everyone else and end the run.
+    for (const c of mpState.conns.values()) {
+      if (c === conn) continue;
+      try { c.send(msg); } catch (_) {}
+    }
+    returnToLobby(`<strong>TEAM WIPED</strong><br />Final Score: ${score}`);
   }
 }
 function mpHandleDataFromHost(msg) {
   if (battleHandleMsgFromHost(msg)) return;
+  if (msg.type === 'coopAllDead') {
+    returnToLobby(`<strong>TEAM WIPED</strong><br />Final Score: ${score}`);
+    return;
+  }
   if (msg.type === 'playerHit') {
     damagePlayer(msg.damage || 1);
     return;
@@ -5987,7 +6224,14 @@ function mpHandleDataFromHost(msg) {
     }
     if (typeof msg.timeLeft === 'number') timeLeft = msg.timeLeft;
     if (typeof msg.waveTimeLeft === 'number') waveTimeLeft = msg.waveTimeLeft;
-    if (typeof msg.currentWaveIdx === 'number') currentWaveIdx = msg.currentWaveIdx;
+    if (typeof msg.currentWaveIdx === 'number') {
+      const prev = currentWaveIdx;
+      currentWaveIdx = msg.currentWaveIdx;
+      // Guest-side wave-advance respawn for co-op spectators waiting for next wave.
+      if (gameMode === 'waves' && currentWaveIdx > prev && coopSpec && coopSpec.active && coopSpec.awaitingWave) {
+        exitCoopSpectator();
+      }
+    }
     // Refresh HUD to reflect host's timer
     if (gameMode === 'waves') {
       timeLabelEl.textContent = `Wave ${currentWaveIdx + 1}:`;
