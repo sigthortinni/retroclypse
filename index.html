@@ -145,19 +145,6 @@
     cursor: pointer; font-weight: bold;
   }
   #mp-click-resume.hidden { display: none; }
-  #respawn-overlay {
-    position: absolute; inset: 0; background: rgba(0,0,0,0.75);
-    display: flex; align-items: center; justify-content: center; z-index: 17;
-    pointer-events: none;
-  }
-  #respawn-overlay.hidden { display: none; }
-  .respawn-panel {
-    background: #10101a; border: 3px solid #ff2a88;
-    box-shadow: 0 0 60px rgba(255,42,136,0.35);
-    padding: 32px 52px; text-align: center; font-family: monospace;
-  }
-  .respawn-panel h2 { margin: 0 0 14px; color: #ff2a88; letter-spacing: 8px; font-size: 32px; }
-  #respawn-timer { color: #c6b4ff; letter-spacing: 4px; font-size: 22px; }
   #battle-waiting {
     position: absolute; inset: 0; background: rgba(0,0,0,0.88);
     display: flex; align-items: center; justify-content: center; z-index: 20;
@@ -483,12 +470,6 @@
   </div>
 </div>
 <div id="mp-click-resume" class="hidden">Click to resume control</div>
-<div id="respawn-overlay" class="hidden">
-  <div class="respawn-panel">
-    <h2>ELIMINATED</h2>
-    <div id="respawn-timer">Respawning in 3…</div>
-  </div>
-</div>
 <div id="battle-waiting" class="hidden">
   <div class="battle-waiting-panel">
     <h2>BATTLE</h2>
@@ -563,7 +544,6 @@
     <div id="gm-row">
       <button class="gm-btn" data-gm="normal">NORMAL</button>
       <button class="gm-btn" data-gm="waves">WAVES</button>
-      <button class="gm-btn" data-gm="freestyle">FREESTYLE</button>
       <button class="gm-btn" data-gm="battle">BATTLE</button>
     </div>
     <div id="mode-row">
@@ -655,7 +635,7 @@ if (!Array.isArray(ownedModes)) ownedModes = ['day'];
 if (!ownedModes.includes('day')) ownedModes.push('day');
 
 let mode = localStorage.getItem('fpsMode') || 'day';
-const GAME_MODES = ['normal', 'waves', 'freestyle', 'battle'];
+const GAME_MODES = ['normal', 'waves', 'battle'];
 let gameMode = localStorage.getItem('fpsGameMode') || 'normal';
 if (!GAME_MODES.includes(gameMode)) gameMode = 'normal';
 document.querySelectorAll('.gm-btn').forEach(btn => {
@@ -672,7 +652,7 @@ document.querySelectorAll('.gm-btn').forEach(btn => {
       localStorage.setItem('fpsGameMode', gameMode);
       document.querySelectorAll('.gm-btn').forEach(b => b.classList.toggle('active', b.dataset.gm === gameMode));
       // Switching to 1v1 clears any leftover zombies on this host; guests will mirror via next snapshot.
-      if (gameMode === 'freestyle' || gameMode === 'battle') { try { mpClearLocalZombies(); } catch (_) {} }
+      if (gameMode === 'battle') { try { mpClearLocalZombies(); } catch (_) {} }
     } else {
       localStorage.setItem('fpsGameMode', btn.dataset.gm);
       location.reload();
@@ -3627,21 +3607,8 @@ function startGame() {
     try { startBattleMatchmaking(); } catch (e) { console.error(e); }
     return;
   }
-  // FREESTYLE requires multiplayer (at least one friend)
-  if (gameMode === 'freestyle' && (!mpState || !mpState.peer)) {
-    try { showPowerMsg('FREESTYLE NEEDS A FRIEND — HOST OR JOIN A ROOM', '#ff2a88'); } catch (_) {}
-    return;
-  }
   // Multiplayer: require all connected players to press PLAY before starting
   if (mpState && mpState.peer) {
-    // 1v1 also needs at least one other connected peer, not just a PeerJS session.
-    if (gameMode === 'freestyle') {
-      const peers = mpState.isHost ? mpState.conns.size : (mpState.hostConn ? 1 : 0);
-      if (peers < 1) {
-        try { showPowerMsg('FREESTYLE NEEDS A FRIEND — WAIT FOR SOMEONE TO JOIN', '#ff2a88'); } catch (_) {}
-        return;
-      }
-    }
     mpReady = true;
     menu.classList.add('hidden');
     const w = document.getElementById('mp-waiting');
@@ -3702,22 +3669,12 @@ menu.addEventListener('click', (e) => {
 });
 controls.addEventListener('unlock', () => {
   if (gameOver) return;
-  // Respawning: the respawn overlay is already showing; don't double up with pause.
-  if (typeof respawning !== 'undefined' && respawning) return;
   // Eliminated in BATTLE: overlay already shown, no pause UI needed.
   if (gameMode === 'battle' && battleState && battleState.eliminated) return;
   const inMultiplayer = mpState.peer !== null;
   if (inMultiplayer) {
-    if (gameMode === 'battle' && battleState && battleState.started) {
-      // BATTLE: no quit allowed mid-match — just re-acquire lock.
-      document.getElementById('mp-click-resume').classList.remove('hidden');
-    } else if (gameMode === 'freestyle') {
-      // FREESTYLE: allow quit via pause overlay. Game keeps running for the other player.
-      document.getElementById('pause-overlay').classList.remove('hidden');
-    } else {
-      // Co-op MP: game keeps running. Just prompt the player to re-acquire pointer lock.
-      document.getElementById('mp-click-resume').classList.remove('hidden');
-    }
+    // MP (co-op or BATTLE): no quit mid-match — just re-acquire pointer lock.
+    document.getElementById('mp-click-resume').classList.remove('hidden');
   } else {
     // Solo: true pause. Stop the simulation and show the pause menu.
     playing = false;
@@ -4094,7 +4051,7 @@ if (gameMode === 'normal') {
 } else if (gameMode === 'waves') {
   startWave(0);
 }
-// FREESTYLE and BATTLE spawn no zombies — player-vs-player modes
+// BATTLE spawns no zombies — player-vs-player mode
 
 const mysteryBalls = [];
 const activePowers = new Map();
@@ -4580,10 +4537,9 @@ const timeEl = document.getElementById('time');
 const coinsHudEl = document.getElementById('coins');
 coinsHudEl.textContent = coins;
 updateAmmoHUD();
-let timeLeft = (gameMode === 'freestyle' || gameMode === 'battle') ? 0 : 120;
+let timeLeft = gameMode === 'battle' ? 0 : 120;
 const timeLabelEl = document.getElementById('time-label');
 if (gameMode === 'waves') { timeLabelEl.textContent = 'Wave 1:'; timeEl.textContent = '30s'; }
-else if (gameMode === 'freestyle') { timeLabelEl.textContent = 'Time:'; timeEl.textContent = '∞ (0s)'; }
 else if (gameMode === 'battle') { timeLabelEl.textContent = 'Alive:'; timeEl.textContent = '—'; }
 else { timeLabelEl.textContent = 'Time:'; timeEl.textContent = '120s'; }
 let gameOver = false;
@@ -4657,11 +4613,9 @@ function playZombieHit() {
   o.start(); o.stop(audioCtx.currentTime + 0.3);
 }
 
-let respawning = false;
 function damagePlayer(amount) {
   if (activePowers.has('phase') || activePowers.has('shield')) return;
   if (!playing || gameOver) return;
-  if (respawning) return;
   playerState.lives = Math.max(0, playerState.lives - amount);
   playerState.lastDamageTime = performance.now() / 1000;
   updateLivesHUD();
@@ -4671,11 +4625,6 @@ function damagePlayer(amount) {
     // BATTLE: eliminate without respawn — wait for match to end.
     if (gameMode === 'battle' && battleState && battleState.started) {
       battleEliminateSelf();
-      return;
-    }
-    // FREESTYLE: don't end the match — eliminate this player and respawn after 3s.
-    if (gameMode === 'freestyle' && mpState && mpState.peer) {
-      beginRespawn();
       return;
     }
     gameOver = true;
@@ -4693,37 +4642,6 @@ function damagePlayer(amount) {
   }
 }
 
-function beginRespawn() {
-  respawning = true;
-  try { controls.unlock(); } catch (_) {}
-  const ov = document.getElementById('respawn-overlay');
-  const lbl = document.getElementById('respawn-timer');
-  if (ov) ov.classList.remove('hidden');
-  let t = 3;
-  if (lbl) lbl.textContent = `Respawning in ${t}…`;
-  const iv = setInterval(() => {
-    t -= 1;
-    if (lbl) lbl.textContent = t > 0 ? `Respawning in ${t}…` : 'Respawning…';
-    if (t <= 0) {
-      clearInterval(iv);
-      finishRespawn();
-    }
-  }, 1000);
-}
-function finishRespawn() {
-  playerState.lives = playerState.maxLives;
-  updateLivesHUD();
-  // Teleport back to spawn and face forward.
-  try {
-    camera.position.set(SPAWN.x, 1.7, SPAWN.z);
-    velocityY = 0;
-  } catch (_) {}
-  respawning = false;
-  const ov = document.getElementById('respawn-overlay');
-  if (ov) ov.classList.add('hidden');
-  try { controls.lock(); } catch (_) {}
-}
-
 // Cache the lobby menu content so we can restore it after an MP round ends.
 let _origMenuHTML = null;
 function _cacheMenuIfNeeded() {
@@ -4736,7 +4654,6 @@ function _cacheMenuIfNeeded() {
 function softRestart() {
   gameOver = false;
   playing = false;
-  respawning = false;
   mpReady = false;
   mpGameStarted = false;
   score = 0;
@@ -4746,7 +4663,6 @@ function softRestart() {
   // Timer + HUD per mode
   if (gameMode === 'normal') { timeLeft = 120; if (timeEl) timeEl.textContent = '120s'; if (timeLabelEl) timeLabelEl.textContent = 'Time:'; }
   else if (gameMode === 'waves') { waveTimeLeft = 30; currentWaveIdx = 0; if (timeLabelEl) timeLabelEl.textContent = 'Wave 1:'; if (timeEl) timeEl.textContent = '30s'; }
-  else if (gameMode === 'freestyle') { timeLeft = 0; if (timeEl) timeEl.textContent = '∞ (0s)'; if (timeLabelEl) timeLabelEl.textContent = 'Time:'; }
   else if (gameMode === 'battle') { timeLeft = 0; if (timeEl) timeEl.textContent = '—'; if (timeLabelEl) timeLabelEl.textContent = 'Alive:'; }
   // Clear zombies on every client
   for (const t of targets) scene.remove(t);
@@ -4762,7 +4678,6 @@ function softRestart() {
   // Hide in-game overlays
   try { document.getElementById('pause-overlay').classList.add('hidden'); } catch (_) {}
   try { document.getElementById('mp-click-resume').classList.add('hidden'); } catch (_) {}
-  try { document.getElementById('respawn-overlay').classList.add('hidden'); } catch (_) {}
   try { document.getElementById('mp-waiting').classList.add('hidden'); } catch (_) {}
   try { controls.unlock(); } catch (_) {}
 }
@@ -4789,17 +4704,6 @@ function returnToLobby(resultHtml) {
     }
   };
   menu.addEventListener('click', restore, { once: true, capture: true });
-}
-// Broadcast an end-of-match message to all peers (used when a 1v1 player quits).
-function mpBroadcastEndMatch() {
-  if (!mpState || !mpState.peer) return;
-  try {
-    if (mpState.isHost) {
-      for (const c of mpState.conns.values()) { try { c.send({ type: 'endMatch' }); } catch (_) {} }
-    } else if (mpState.hostConn) {
-      mpState.hostConn.send({ type: 'endMatch' });
-    }
-  } catch (_) {}
 }
 
 const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
@@ -4947,7 +4851,7 @@ function rayCastFirst(dirWorld) {
   const origin = camera.position.clone();
   raycaster.set(origin, dirWorld);
   // In 1v1 MP, remote player avatars become valid raycast targets
-  const pvpGroups = ((gameMode === 'freestyle' || gameMode === 'battle') && mpState && mpState.peer)
+  const pvpGroups = (gameMode === 'battle' && mpState && mpState.peer)
     ? Array.from(mpState.remotes.values()).map(r => r.group) : [];
   const hits = raycaster.intersectObjects([...targets, ...mysteryBalls, ...walls, ...pvpGroups], true);
   if (!hits.length) return null;
@@ -5096,7 +5000,7 @@ function shoot() {
 
 
   raycaster.setFromCamera(new THREE.Vector2(0, 0), camera);
-  const pvpGroups = ((gameMode === 'freestyle' || gameMode === 'battle') && mpState && mpState.peer)
+  const pvpGroups = (gameMode === 'battle' && mpState && mpState.peer)
     ? Array.from(mpState.remotes.values()).map(r => r.group) : [];
   const hits = raycaster.intersectObjects([...targets, ...mysteryBalls, ...walls, ...pvpGroups], true);
   const endWorld = hits.length
@@ -5888,7 +5792,6 @@ function animate() {
   let clockSec;
   if (!playing || gameOver) clockSec = 0;
   else if (gameMode === 'waves') clockSec = waveTimeLeft;
-  else if (gameMode === 'freestyle') clockSec = timeLeft;
   else clockSec = timeLeft;
   drawClock(clockSec);
 
@@ -6052,16 +5955,6 @@ function mpHandleDataFromGuest(conn, msg) {
     // Host: apply damage to zombie by zid
     const t = targets.find(z => z.userData.zid === msg.zid);
     if (t) damageTarget(t, msg.damage || 1);
-  } else if (msg.type === 'endMatch') {
-    // A guest quit during FREESTYLE — end the match for everyone.
-    // Relay to all other guests, then return this host to the lobby.
-    if (mpState.isHost) {
-      for (const c of mpState.conns.values()) {
-        if (c === conn) continue;
-        try { c.send({ type: 'endMatch' }); } catch (_) {}
-      }
-    }
-    returnToLobby('<strong>MATCH ENDED</strong><br /><small>A player quit the freestyle.</small>');
   }
 }
 function mpHandleDataFromHost(msg) {
@@ -6070,21 +5963,16 @@ function mpHandleDataFromHost(msg) {
     damagePlayer(msg.damage || 1);
     return;
   }
-  if (msg.type === 'endMatch') {
-    // Host told us the FREESTYLE match ended (someone quit). Return to lobby.
-    returnToLobby('<strong>MATCH ENDED</strong><br /><small>A player quit the freestyle.</small>');
-    return;
-  }
   if (msg.type === 'start') {
     // Host-authoritative game mode — overrides guest's local pick
     if (msg.gameMode && GAME_MODES.includes(msg.gameMode)) {
       gameMode = msg.gameMode;
       // Adjust local timer + HUD label to match host's mode
-      if (gameMode === 'freestyle') { timeLeft = 0; timeEl.textContent = '∞ (0s)'; timeLabelEl.textContent = 'Time:'; }
+      if (gameMode === 'battle') { timeLeft = 0; timeEl.textContent = '—'; timeLabelEl.textContent = 'Alive:'; }
       else if (gameMode === 'waves') { timeLabelEl.textContent = 'Wave 1:'; timeEl.textContent = '30s'; }
       else { timeLabelEl.textContent = 'Time:'; timeLeft = 120; timeEl.textContent = '120s'; }
-      // 1v1 has no zombies — clear any that were pre-spawned from a prior mode.
-      if (gameMode === 'freestyle' || gameMode === 'battle') { try { mpClearLocalZombies(); } catch (_) {} }
+      // BATTLE has no zombies — clear any that were pre-spawned from a prior mode.
+      if (gameMode === 'battle') { try { mpClearLocalZombies(); } catch (_) {} }
     }
     mpActuallyStart();
     return;
@@ -6094,8 +5982,8 @@ function mpHandleDataFromHost(msg) {
     if (msg.gameMode && GAME_MODES.includes(msg.gameMode) && gameMode !== msg.gameMode) {
       gameMode = msg.gameMode;
       if (typeof refreshGameModeButtons === 'function') refreshGameModeButtons();
-      // If we just entered 1v1, drop any leftover zombies immediately.
-      if (gameMode === 'freestyle' || gameMode === 'battle') { try { mpClearLocalZombies(); } catch (_) {} }
+      // If we just entered BATTLE, drop any leftover zombies immediately.
+      if (gameMode === 'battle') { try { mpClearLocalZombies(); } catch (_) {} }
     }
     if (typeof msg.timeLeft === 'number') timeLeft = msg.timeLeft;
     if (typeof msg.waveTimeLeft === 'number') waveTimeLeft = msg.waveTimeLeft;
@@ -6104,9 +5992,9 @@ function mpHandleDataFromHost(msg) {
     if (gameMode === 'waves') {
       timeLabelEl.textContent = `Wave ${currentWaveIdx + 1}:`;
       timeEl.textContent = waveTimeLeft + 's';
-    } else if (gameMode === 'freestyle') {
-      timeLabelEl.textContent = 'Time:';
-      timeEl.textContent = `∞ (${timeLeft}s)`;
+    } else if (gameMode === 'battle') {
+      timeLabelEl.textContent = 'Alive:';
+      timeEl.textContent = '—';
     } else {
       timeLabelEl.textContent = 'Time:';
       timeEl.textContent = timeLeft + 's';
@@ -6260,11 +6148,6 @@ function mpHost() {
       mpState.conns.delete(conn.peer);
       mpRemoveRemote(conn.peer);
       mpUpdateHud();
-      // FREESTYLE: if a guest drops mid-match, end the match for everyone.
-      if (gameMode === 'freestyle' && mpGameStarted) {
-        try { mpBroadcastEndMatch(); } catch (_) {}
-        returnToLobby('<strong>MATCH ENDED</strong><br /><small>A player left the freestyle.</small>');
-      }
     });
     conn.on('error', () => {});
   });
@@ -6449,7 +6332,7 @@ function startBattleMatchmaking() {
   if (battleState.active) return;
   if (typeof Peer === 'undefined') { try { showPowerMsg('PEERJS NOT LOADED', '#ff2a88'); } catch (_) {} return; }
   if (mpState.peer) {
-    // Tear down any existing FREESTYLE/coop session first
+    // Tear down any existing co-op/session first
     battleTeardownPeer();
   }
   battleState.active = true;
@@ -6632,10 +6515,6 @@ function mpJoin(code) {
       mpSetStatus('Disconnected from host');
       // Remove avatars
       for (const id2 of Array.from(mpState.remotes.keys())) mpRemoveRemote(id2);
-      // FREESTYLE: losing the host ends the match.
-      if (gameMode === 'freestyle' && mpGameStarted) {
-        returnToLobby('<strong>MATCH ENDED</strong><br /><small>Host left the freestyle.</small>');
-      }
     });
     conn.on('error', e => mpSetStatus('Error: ' + (e && e.type ? e.type : e)));
   });
@@ -6864,13 +6743,6 @@ document.getElementById('pause-resume').addEventListener('click', (e) => {
 });
 document.getElementById('pause-quit').addEventListener('click', (e) => {
   e.stopPropagation();
-  // FREESTYLE MP: quitting ends the match for everyone (they return to lobby, quitter fully leaves).
-  if (gameMode === 'freestyle' && mpState && mpState.peer) {
-    try { mpBroadcastEndMatch(); } catch (_) {}
-    // Give the broadcast a moment to flush before tearing down the peer.
-    setTimeout(() => { location.reload(); }, 120);
-    return;
-  }
   location.reload();
 });
 // MP click-to-resume: re-acquire pointer lock without pausing
