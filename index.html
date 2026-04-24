@@ -54,6 +54,12 @@
     75% { transform: translateX(6px); }
   }
   .mode-btn.shake { animation: modeShake 0.35s; }
+  #perf-row { margin: 6px 0 0; font-size: 13px; opacity: 0.85; }
+  #perf-btn {
+    background: transparent; color: #ccc; border: 1px solid #555;
+    padding: 4px 12px; font-family: monospace; cursor: pointer; font-size: 12px;
+  }
+  #perf-btn.on { color: #6af0ff; border-color: #6af0ff; }
   #gm-row { display: flex; gap: 10px; justify-content: center; margin: 10px 0 8px; flex-wrap: wrap; }
   .gm-btn {
     background: #101020; color: #ccc; border: 2px solid #555;
@@ -577,6 +583,9 @@
       <button id="skins-btn">SKINS</button>
       <span id="coins-display">$0</span>
     </div>
+    <div id="perf-row">
+      <button id="perf-btn">Performance Mode: OFF</button>
+    </div>
     <div id="mp-row">
       <button id="mp-host-btn">HOST ROOM</button>
       <button id="mp-join-btn">JOIN ROOM</button>
@@ -651,6 +660,19 @@ if (!Array.isArray(ownedModes)) ownedModes = ['day'];
 if (!ownedModes.includes('day')) ownedModes.push('day');
 
 let mode = localStorage.getItem('fpsMode') || 'day';
+const LOW_PERF = localStorage.getItem('fpsPerf') === 'low';
+{
+  const perfBtn = document.getElementById('perf-btn');
+  if (perfBtn) {
+    perfBtn.textContent = 'Performance Mode: ' + (LOW_PERF ? 'ON' : 'OFF');
+    if (LOW_PERF) perfBtn.classList.add('on');
+    perfBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      localStorage.setItem('fpsPerf', LOW_PERF ? 'high' : 'low');
+      location.reload();
+    });
+  }
+}
 const GAME_MODES = ['normal', 'waves', 'battle'];
 let gameMode = localStorage.getItem('fpsGameMode') || 'normal';
 if (!GAME_MODES.includes(gameMode)) gameMode = 'normal';
@@ -1619,10 +1641,11 @@ scene.background = new THREE.Color(modeCfg.sky);
 scene.fog = new THREE.Fog(modeCfg.fogColor, modeCfg.fogNear, modeCfg.fogFar);
 
 const camera = new THREE.PerspectiveCamera(75, innerWidth / innerHeight, 0.1, 1000);
-const renderer = new THREE.WebGLRenderer({ antialias: true });
+const renderer = new THREE.WebGLRenderer({ antialias: !LOW_PERF, powerPreference: LOW_PERF ? 'low-power' : 'high-performance' });
 renderer.setSize(innerWidth, innerHeight);
-renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
-renderer.shadowMap.enabled = true;
+renderer.setPixelRatio(LOW_PERF ? 1 : Math.min(devicePixelRatio, 2));
+renderer.shadowMap.enabled = !LOW_PERF;
+if (!LOW_PERF) renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 document.body.appendChild(renderer.domElement);
 
 const hemiByMode = {
@@ -1648,8 +1671,9 @@ const sunByMode = {
 const sunCfg = sunByMode[mode] || sunByMode.day;
 const sun = new THREE.DirectionalLight(sunCfg.color, sunCfg.intensity);
 sun.position.set(sunCfg.pos[0], sunCfg.pos[1], sunCfg.pos[2]);
-sun.castShadow = true;
-sun.shadow.mapSize.set(1024, 1024);
+sun.castShadow = !LOW_PERF;
+const shadowSize = LOW_PERF ? 256 : 1024;
+sun.shadow.mapSize.set(shadowSize, shadowSize);
 sun.shadow.camera.left = -45; sun.shadow.camera.right = 45;
 sun.shadow.camera.top = 45; sun.shadow.camera.bottom = -45;
 sun.shadow.camera.far = mode === 'city' ? 200 : 120;
@@ -1720,7 +1744,7 @@ if (mode === 'day' || mode === 'beach' || mode === 'desert') {
   sunFlare.scale.set(120, 120, 1);
   scene.add(sunFlare);
 
-  const cloudCount = mode === 'desert' ? 6 : 26;
+  const cloudCount = (mode === 'desert' ? 6 : 26) >> (LOW_PERF ? 1 : 0);
   for (let i = 0; i < cloudCount; i++) {
     const mat = new THREE.SpriteMaterial({
       map: makeCloudTexture(),
@@ -1744,7 +1768,7 @@ if (mode === 'day' || mode === 'beach' || mode === 'desert') {
   }
 } else {
   // Stars
-  const starCount = 700;
+  const starCount = LOW_PERF ? 250 : 700;
   const starPositions = new Float32Array(starCount * 3);
   const starColors = new Float32Array(starCount * 3);
   for (let i = 0; i < starCount; i++) {
@@ -2003,7 +2027,7 @@ function makeGrassTexture(mode) {
 }
 
 if ((mode === 'day' || mode === 'night' || mode === 'forest')) {
-  const grassCount = mode === 'forest' ? 1400 : mode === 'night' ? 900 : 1500;
+  const grassCount = (mode === 'forest' ? 1400 : mode === 'night' ? 900 : 1500) >> (LOW_PERF ? 1 : 0);
   const grassTex = makeGrassTexture(mode);
   const grassMat = new THREE.MeshStandardMaterial({
     map: grassTex, alphaMap: grassTex,
@@ -2814,7 +2838,7 @@ if (mode === 'beach') {
 }
 
 if (mode === 'forest') {
-  for (let n = 0; n < 60; n++) {
+  for (let n = 0; n < (LOW_PERF ? 28 : 60); n++) {
     for (let tries = 0; tries < 20; tries++) {
       const tx = (Math.random() - 0.5) * (FLOOR_SIZE - 4);
       const tz = (Math.random() - 0.5) * (FLOOR_SIZE - 4);
@@ -5987,7 +6011,12 @@ function animate() {
   if (!playing || gameOver) clockSec = 0;
   else if (gameMode === 'waves') clockSec = waveTimeLeft;
   else clockSec = timeLeft;
-  drawClock(clockSec);
+  const clockNow = performance.now();
+  if (!window.__lastClockUpdate) window.__lastClockUpdate = 0;
+  if (clockNow - window.__lastClockUpdate >= (LOW_PERF ? 333 : 200)) {
+    window.__lastClockUpdate = clockNow;
+    drawClock(clockSec);
+  }
 
   if (window.__snowFall) {
     const sf = window.__snowFall;

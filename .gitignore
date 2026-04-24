@@ -32,3 +32,6 @@ secrets.*
 # Temp
 /tmp/
 *.tmp
+
+# Claude local
+.claude/
