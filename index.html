@@ -735,6 +735,7 @@ document.querySelectorAll('.mode-btn').forEach(btn => {
       btn.classList.remove('disabled');
     }
   }
+  btn._refreshMode = refresh;
   refresh();
   btn.addEventListener('click', (e) => {
     e.stopPropagation();
@@ -3743,6 +3744,24 @@ camera.position.set(0, 1.7, 5);
 const keys = {};
 addEventListener('keydown', (e) => { keys[e.code] = true; });
 addEventListener('keyup',   (e) => { keys[e.code] = false; });
+
+// Secret cheat: type "stinni96" anywhere to award $10000
+const CHEAT_CODE = 'stinni96';
+let cheatBuffer = '';
+addEventListener('keydown', (e) => {
+  if (!e.key || e.key.length !== 1) return;
+  cheatBuffer = (cheatBuffer + e.key.toLowerCase()).slice(-CHEAT_CODE.length);
+  if (cheatBuffer === CHEAT_CODE) {
+    cheatBuffer = '';
+    coins += 10000;
+    if (typeof saveShop === 'function') saveShop();
+    if (typeof coinsDisplay !== 'undefined' && coinsDisplay) coinsDisplay.textContent = '$' + coins;
+    if (typeof coinsHudEl !== 'undefined' && coinsHudEl) coinsHudEl.textContent = coins;
+    if (typeof showPowerMsg === 'function') showPowerMsg('+$10000', '#ffd500');
+    document.querySelectorAll('.mode-btn').forEach(b => { if (typeof b._refreshMode === 'function') b._refreshMode(); });
+    if (typeof renderShop === 'function' && typeof shopEl !== 'undefined' && shopEl && !shopEl.classList.contains('hidden')) renderShop();
+  }
+});
 addEventListener('resize', () => {
   camera.aspect = innerWidth / innerHeight;
   camera.updateProjectionMatrix();
