@@ -5786,6 +5786,8 @@ function animate() {
   const nowSec = performance.now() / 1000;
   const ATTACK_RANGE = 1.7;
   const ATTACK_COOLDOWN = 1.0;
+  const losBlockers = walls.filter(w => !w.userData.isFloor);
+  const _losRay = new THREE.Raycaster();
   if (playing && !gameOver) {
     for (const t of targets) {
       if (!t.userData.isZombie) continue;
@@ -5795,6 +5797,17 @@ function animate() {
       const dz = t.position.z - camPos.z;
       const dy = t.position.y + 1.0 - camPos.y;
       if (dx * dx + dz * dz + dy * dy * 0.5 < ATTACK_RANGE * ATTACK_RANGE) {
+        // Line-of-sight check: zombie can't attack through walls
+        const zOrigin = new THREE.Vector3(t.position.x, t.position.y + 1.2, t.position.z);
+        const toPlayer = new THREE.Vector3().subVectors(camPos, zOrigin);
+        const dist = toPlayer.length();
+        if (dist > 0.05) {
+          _losRay.set(zOrigin, toPlayer.clone().normalize());
+          _losRay.far = dist - 0.05;
+          const blocked = _losRay.intersectObjects(losBlockers, false);
+          _losRay.far = Infinity;
+          if (blocked.length) continue;
+        }
         const lastAtk = t.userData.lastAttackTime || -999;
         if (nowSec - lastAtk >= ATTACK_COOLDOWN) {
           t.userData.lastAttackTime = nowSec;
@@ -5816,7 +5829,7 @@ function animate() {
     // Armed zombies shoot at the player
     const GUN_RANGE = 10;
     const GUN_COOLDOWN = 2.5;
-    const shotBlockers = walls.filter(w => !w.userData.isFloor);
+    const shotBlockers = losBlockers;
     for (const zt of targets) {
       if (!zt.userData.hasGun) continue;
       const origin = new THREE.Vector3(zt.position.x, zt.position.y + 1.55, zt.position.z);
